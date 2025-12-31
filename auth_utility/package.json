@@ -4,7 +4,7 @@
   "description": "Local Plaid app for financial analysis",
   "scripts": {
     "start": "concurrently \"pnpm run start-backend\" \"pnpm run start-frontend\"",
-    "start-backend": "cd backend && ..\\.venv\\Scripts\\python -m uvicorn main:app --reload --port 8000",
+    "start-backend": "cd backend && ..\\..\\.venv\\Scripts\\python -m uvicorn main:app --reload --port 8000",
     "start-frontend": "cd frontend && pnpm run dev",
     "install-all": "pnpm install && cd frontend && pnpm install"
   },

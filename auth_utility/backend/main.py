@@ -12,7 +12,8 @@ from plaid.model.item_public_token_exchange_request import ItemPublicTokenExchan
 from dotenv import load_dotenv
 import time
 
-load_dotenv()
+# Load .env from project root (up 2 levels from backend/main.py)
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', '..', '.env'))
 
 app = FastAPI()
 
