@@ -1,12 +1,7 @@
-# Frontend - React
+# Auth Frontend
 
-A simple UI to view transactions and investment holdings.
+This React app provides the Plaid Link UI to authenticate with your bank.
+Once authenticated, it displays the Access Token for you to copy to your `.env` file.
 
-## Commands
-```bash
-pnpm install
-pnpm run dev
-```
-
-## Configuration
-Connects to the backend at `http://localhost:8000`. Base URL is set in `App.tsx`.
+## Usage
+Run via the root `pnpm start` command.

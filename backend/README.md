@@ -1,13 +1,7 @@
-# Backend - FastAPI
+# Auth Backend
 
-Handles Plaid API interaction and SQLite storage.
+This FastAPI server exists solely to exchange the Plaid Public Token for an Access Token.
+It does not store data or perform analysis.
 
-## Key Files
-- `main.py`: The FastAPI server.
-- `financial_data.db`: SQLite database (ignored by git).
-
-## Setup
-Ensure the root `.venv` is active or use the absolute path to the venv python:
-```bash
-..\.venv\Scripts\python -m uvicorn main:app --reload --port 8000
-```
+## Usage
+Run via the root `pnpm start` command.

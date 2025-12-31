@@ -1,26 +1,38 @@
 # Plaid Local Analysis
 
-A tool to sync Plaid financial data to a local SQLite database for analysis.
+A local-first tool for analyzing your financial data using Plaid.
 
-## Project Structure
-- `backend/`: FastAPI server and SQLite database (`financial_data.db`).
-- `frontend/`: React + Vite frontend.
-- `.venv/`: Python virtual environment.
+## Architecture
+- **`analysis/`**: **Main Work Area.** Standalone Python scripts to fetch data and run analysis.
+- **`backend/` & `frontend/`**: A utility web app used *only* to link your bank account and generate an Access Token.
 
-## Quick Start
+## Workflow
 
-1. **Setup Env**: Copy `.env.example` to `.env` and add your Plaid keys and `PLAID_ACCESS_TOKEN`.
-2. **Install Dependencies**:
+### 1. Setup Authentication
+1. Copy `.env.example` to `.env` and fill in your `PLAID_CLIENT_ID` and `PLAID_SECRET`.
+2. Start the auth utility:
    ```bash
    pnpm install-all
-   ```
-3. **Run App**:
-   ```bash
    pnpm start
    ```
-   - Frontend: http://localhost:5173
-   - Backend: http://localhost:8000
+3. Open `http://localhost:5173`, link your bank account.
+4. **Copy the Access Token** displayed on the screen and paste it into your `.env` file as `PLAID_ACCESS_TOKEN`.
+5. Stop the web app (Ctrl+C). You don't need it anymore unless you need to link a new account.
 
-## How it works
-- The **Sync** button in the UI triggers the backend to fetch the last 30 days of data from Plaid and save it to `backend/financial_data.db`.
-- The UI reads directly from the local database, allowing for fast browsing without constant API calls.
+### 2. Fetch Data
+Run the fetcher script to download your transactions and investments to a local SQLite database (`analysis/financial_data.db`).
+
+```bash
+python analysis/data_fetcher.py
+```
+
+### 3. Analyze
+Run the analysis script (or create your own) to query the local database.
+
+```bash
+python analysis/basic_analysis.py
+```
+
+## Requirements
+- Python 3.x
+- Node.js & pnpm
