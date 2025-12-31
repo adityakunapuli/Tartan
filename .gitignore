@@ -3,6 +3,8 @@
 .gemini/
 .env
 __pycache__/
+*.db
+*.csv
 *.py[oc]
 build/
 dist/
