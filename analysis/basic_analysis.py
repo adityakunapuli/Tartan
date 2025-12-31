@@ -1,61 +1,72 @@
 #%%
-import sqlite3
-import pandas as pd
+import sys
 import os
-import matplotlib.pyplot as plt
+from pathlib import Path
 
-# Configuration
-DB_PATH = os.path.join(os.path.dirname(__file__), 'financial_data.db')
+# Add analysis dir to sys.path
+sys.path.append(str(Path(__file__).parent))
 
-def get_connection():
-    return sqlite3.connect(DB_PATH)
+from data_layer import get_transactions_df, get_denormalized_holdings
 
 #%%
 # ==========================================
 # 1. LOAD TRANSACTIONS
 # ==========================================
-conn = get_connection()
-df_tx = pd.read_sql_query("SELECT * FROM transactions ORDER BY date DESC", conn)
-df_tx['date'] = pd.to_datetime(df_tx['date'])
-df_tx['amount'] = pd.to_numeric(df_tx['amount'])
+df_tx = get_transactions_df()
 
-print(f"Loaded {len(df_tx)} transactions.")
-print(df_tx.head())
+if not df_tx.empty:
+    print(f"Loaded {len(df_tx)} transactions.")
+    print(df_tx[['date', 'name', 'amount', 'category']].head())
+else:
+    print("No transactions found.")
 
 #%%
 # ==========================================
 # 2. SPENDING BY CATEGORY
 # ==========================================
-# Filter out negative amounts (income/transfers) for spending analysis
-spending = df_tx[df_tx['amount'] > 0].copy()
-category_sum = spending.groupby('category')['amount'].sum().sort_values(ascending=False)
+if not df_tx.empty:
+    # Filter out negative amounts (income/transfers) for spending analysis
+    spending = df_tx[df_tx['amount'] > 0].copy()
+    
+    # Category is often a list, take the first element or 'Uncategorized'
+    # Since we store JSON, we might need to parse it or if pandas read it as list, it works.
+    # SQL read might return list as string if not using sqlalchemy type processing in pandas read (which we didn't explicitly do for raw sql read)
+    # But our models.py defined it as JSON type, so if we use ORM it handles it. 
+    # data_layer uses read_sql, which relies on DBAPI. SQLite JSON is string.
+    # Let's simple check type.
+    
+    def get_cat_name(x):
+        if isinstance(x, list) and len(x) > 0:
+            return x[0]
+        # if string representation of list
+        if isinstance(x, str) and x.startswith('['):
+            import ast
+            try:
+                l = ast.literal_eval(x)
+                if len(l) > 0: return l[0]
+            except:
+                pass
+        return "Uncategorized"
 
-print("\n--- Spending by Category ---")
-print(category_sum)
+    spending['primary_category'] = spending['category'].apply(get_cat_name)
+    category_sum = spending.groupby('primary_category')['amount'].sum().sort_values(ascending=False)
 
-# Optional: Plot
-# category_sum.plot(kind='bar', title='Spending by Category')
-# plt.show()
+    print("\n--- Spending by Category ---")
+    print(category_sum)
 
 #%%
 # ==========================================
 # 3. INVESTMENT PORTFOLIO
 # ==========================================
-# Get the most recent snapshot of holdings
-query = """
-    SELECT h.*, s.name as security_name, s.ticker
-    FROM investment_holdings h
-    JOIN securities s ON h.security_id = s.security_id
-    WHERE h.date_captured = (SELECT MAX(date_captured) FROM investment_holdings)
-"""
-df_inv = pd.read_sql_query(query, conn)
+df_inv = get_denormalized_holdings()
 
-print(f"\nLoaded {len(df_inv)} investment holdings.")
+if not df_inv.empty:
+    print(f"\nLoaded {len(df_inv)} investment holdings.")
+    
+    total_value = df_inv['institution_value'].sum()
+    print(f"\nTotal Portfolio Value: ${total_value:,.2f}")
 
-total_value = df_inv['value'].sum()
-print(f"\nTotal Portfolio Value: ${total_value:,.2f}")
-
-print("\n--- Top Holdings ---")
-print(df_inv[['security_name', 'ticker', 'value', 'quantity']].sort_values(by='value', ascending=False).head())
-
-conn.close()
+    print("\n--- Top Holdings ---")
+    print(df_inv[['security_name', 'ticker_symbol', 'institution_value', 'quantity']].sort_values(by='institution_value', ascending=False).head())
+else:
+    print("No investment holdings found.")
