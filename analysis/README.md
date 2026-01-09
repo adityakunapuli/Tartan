@@ -1,32 +1,35 @@
-# Financial Analysis
+# Financial Analysis Suite
 
-This directory contains standalone scripts for fetching and analyzing your financial data. 
-These scripts run independently of the web application.
+This directory contains the logic for the "Local Environment" shown in the root README diagrams.
 
-## Prerequisites
-1. Ensure your `.env` file in the project root has your `PLAID_CLIENT_ID`, `PLAID_SECRET`, and a valid `PLAID_ACCESS_TOKEN`.
-   - If you don't have an access token yet, run the web app (`pnpm start` in root), link your account, and copy the token from the UI (or `.env` if using the experimental sync).
+## Key Modules
 
-## Usage
+### `services.sync`
+- Fetches data from Plaid API.
+- Supports pagination for large transaction histories (default 2 years).
+- Stores raw JSON responses for future-proofing.
 
-### 1. Fetch Data
-Run `data_fetcher.py` to download transactions and investments from Plaid into a local SQLite database (`financial_data.db`).
+### `services.llm_categorizer`
+- **The Brains.** Connects to your local LLM to classify transactions.
+- Clusters transactions by `merchant_name` or `cleaned_name` (regex pattern).
+- Sends rich context (average amount, frequency, payment channel) to the LLM for higher accuracy.
+- Saves decisions as rules in `category_rules` table.
+
+### `reporting.portfolio_summary`
+- Generates the final view.
+- Joins `transactions` with `category_rules` to show spending by enriched category.
+- Calculates historical investment flows (Buys vs Sells) and Fees.
+
+## Running
+Execute modules as scripts from the **project root**:
 
 ```bash
-# From project root
-python analysis/data_fetcher.py
+# Sync
+python -m analysis.main
+
+# Categorize
+python -m analysis.services.llm_categorizer
+
+# Report
+python -m analysis.reporting.portfolio_summary
 ```
-
-### 2. Analyze Data
-Run `basic_analysis.py` to view simple insights (Spending by Category, Portfolio Value).
-This file is formatted with `#%%` markers, making it compatible with VS Code's Interactive Window or Jupyter functionality for chunk-based execution.
-
-```bash
-# From project root
-python analysis/basic_analysis.py
-```
-
-## Files
-- `data_fetcher.py`: Connects to Plaid API, fetches data, saves to `financial_data.db`.
-- `basic_analysis.py`: Reads `financial_data.db` using Pandas and prints analysis.
-- `financial_data.db`: SQLite database storing your financial data (local only, ignored by git).

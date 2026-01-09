@@ -1,6 +1,5 @@
-from sqlalchemy import create_engine, Column, Integer, String, Float, Boolean, Date, JSON, ForeignKey, Text
-from sqlalchemy.orm import declarative_base, relationship, sessionmaker
-from pathlib import Path
+from sqlalchemy import Column, Integer, String, Float, Boolean, Date, JSON, ForeignKey
+from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
 
@@ -13,23 +12,43 @@ class Transaction(Base):
     name = Column(String)
     amount = Column(Float)
     currency = Column(String, nullable=True)
-    category = Column(JSON, nullable=True) # Storing list of categories as JSON
+    category = Column(JSON, nullable=True)
     category_id = Column(String, nullable=True)
     pending = Column(Boolean)
     merchant_name = Column(String, nullable=True)
     payment_channel = Column(String, nullable=True)
-    
-    # Store the full raw response to ensure we capture EVERYTHING available
     raw_json = Column(JSON)
 
     def __repr__(self):
         return f"<Transaction(id='{self.transaction_id}', date='{self.date}', amount={self.amount}, name='{self.name}')>"
 
+class InvestmentTransaction(Base):
+    __tablename__ = 'investment_transactions'
+
+    investment_transaction_id = Column(String, primary_key=True)
+    account_id = Column(String, index=True)
+    security_id = Column(String, ForeignKey('securities.security_id'), index=True)
+    date = Column(Date)
+    name = Column(String)
+    quantity = Column(Float)
+    amount = Column(Float)
+    price = Column(Float)
+    fees = Column(Float, nullable=True)
+    type = Column(String)
+    subtype = Column(String, nullable=True)
+    currency = Column(String, nullable=True)
+    raw_json = Column(JSON)
+
+    security = relationship("Security")
+
+    def __repr__(self):
+        return f"<InvestmentTransaction(id='{self.investment_transaction_id}', date='{self.date}', type='{self.type}', amount={self.amount})>"
+
 class InvestmentHolding(Base):
     __tablename__ = 'investment_holdings'
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    date_captured = Column(Date, index=True) # To snapshot holdings over time
+    date_captured = Column(Date, index=True)
     account_id = Column(String, index=True)
     security_id = Column(String, ForeignKey('securities.security_id'), index=True)
     quantity = Column(Float)
@@ -37,8 +56,6 @@ class InvestmentHolding(Base):
     institution_value = Column(Float)
     cost_basis = Column(Float, nullable=True)
     currency = Column(String, nullable=True)
-    
-    # Store full raw response
     raw_json = Column(JSON)
 
     security = relationship("Security", back_populates="holdings")
@@ -58,8 +75,6 @@ class Security(Base):
     close_price_as_of = Column(Date, nullable=True)
     currency = Column(String, nullable=True)
     is_cash_equivalent = Column(Boolean, nullable=True)
-    
-    # Store full raw response
     raw_json = Column(JSON)
 
     holdings = relationship("InvestmentHolding", back_populates="security")
@@ -67,12 +82,16 @@ class Security(Base):
     def __repr__(self):
         return f"<Security(name='{self.name}', ticker='{self.ticker_symbol}')>"
 
-# Database Setup
-DB_FILE = Path(__file__).parent / 'financial_data_v2.db'
-DATABASE_URL = f"sqlite:///{DB_FILE}"
+class CategoryRule(Base):
+    __tablename__ = 'category_rules'
 
-engine = create_engine(DATABASE_URL)
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-def init_db():
-    Base.metadata.create_all(bind=engine)
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    # The key to match against. 
+    # If merchant_name exists in transaction, we match against 'merchant_name'.
+    # If not, we match against 'name'.
+    match_value = Column(String, unique=True, index=True) 
+    match_type = Column(String) # 'merchant_name' or 'name'
+    category = Column(String) # The standardized category (e.g. "Groceries")
+    
+    def __repr__(self):
+        return f"<CategoryRule(match='{self.match_value}', category='{self.category}')>"
