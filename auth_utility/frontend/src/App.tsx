@@ -7,14 +7,16 @@ axios.defaults.baseURL = 'http://localhost:8000';
 function App() {
   const [linkToken, setLinkToken] = useState<string | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     async function createLinkToken() {
       try {
         const response = await axios.post('/api/create_link_token');
         setLinkToken(response.data.link_token);
-      } catch (err) {
+      } catch (err: any) {
         console.error("Error creating link token:", err);
+        setError(err.message || "Failed to load Link Token");
       }
     }
     createLinkToken();
@@ -52,6 +54,12 @@ function App() {
       <p style={{ marginBottom: '30px', color: '#666' }}>
         Use this page to authenticate with your bank and generate an Access Token.
       </p>
+
+      {error && (
+        <div style={{ color: 'red', marginBottom: '20px', padding: '10px', border: '1px solid red', borderRadius: '4px' }}>
+          <strong>Error:</strong> {error}
+        </div>
+      )}
       
       {!accessToken ? (
         <button 
