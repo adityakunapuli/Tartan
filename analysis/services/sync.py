@@ -7,14 +7,15 @@ from plaid.model.transactions_get_request_options import TransactionsGetRequestO
 from plaid.model.investments_holdings_get_request import InvestmentsHoldingsGetRequest
 from plaid.model.investments_transactions_get_request import InvestmentsTransactionsGetRequest
 from plaid.model.investments_transactions_get_request_options import InvestmentsTransactionsGetRequestOptions
+from plaid.model.accounts_get_request import AccountsGetRequest
 from dotenv import load_dotenv
 
-from analysis.db.models import Transaction, InvestmentHolding, Security, InvestmentTransaction
+from analysis.db.models import Transaction, InvestmentHolding, Security, InvestmentTransaction, Account
 from analysis.db.session import SessionLocal, init_db
 
-# Load .env from current directory or specific path. 
-# Since we run from root, load_dotenv() works if .env is in root.
-load_dotenv()
+# Load .env from project root
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+load_dotenv(os.path.join(BASE_DIR, '.env'), override=True)
 
 def get_plaid_client():
     client_id = os.getenv('PLAID_CLIENT_ID')
@@ -241,6 +242,43 @@ def sync_investment_transactions(session, client, access_token, days=730):
     
     print(f"  -> Total Investment Transactions Synced: {total_retrieved}")
 
+def sync_accounts(session, client, access_token):
+    print("Syncing Accounts (Balances)...")
+    try:
+        request = AccountsGetRequest(access_token=access_token)
+        response = client.accounts_get(request)
+        
+        count = 0
+        for a in response['accounts']:
+            a_dict = a.to_dict()
+            a_dict_serializable = make_json_serializable(a_dict)
+            
+            # Balances object
+            balances = a.balances
+            
+            acc_obj = Account(
+                account_id=a.account_id,
+                name=a.name,
+                mask=a.mask,
+                type=str(a.type),
+                subtype=str(a.subtype) if a.subtype else None,
+                current_balance=balances.current,
+                available_balance=balances.available,
+                iso_currency_code=balances.iso_currency_code,
+                limit=balances.limit,
+                last_updated=datetime.date.today(),
+                raw_json=a_dict_serializable
+            )
+            session.merge(acc_obj)
+            count += 1
+            
+        session.commit()
+        print(f"  -> Saved {count} accounts.")
+        
+    except plaid.ApiException as e:
+        print(f"  -> Error: {e}")
+        session.rollback()
+
 def run_sync():
     init_db()
     client = get_plaid_client()
@@ -259,6 +297,7 @@ def run_sync():
 
         for i, token in enumerate(access_tokens):
             print(f"\n--- Syncing Institution {i+1}/{len(access_tokens)} ---")
+            sync_accounts(session, client, token)
             sync_transactions(session, client, token)
             sync_holdings(session, client, token)
             sync_investment_transactions(session, client, token)

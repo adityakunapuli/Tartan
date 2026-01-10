@@ -82,6 +82,24 @@ class Security(Base):
     def __repr__(self):
         return f"<Security(name='{self.name}', ticker='{self.ticker_symbol}')>"
 
+class Account(Base):
+    __tablename__ = 'accounts'
+
+    account_id = Column(String, primary_key=True)
+    name = Column(String)
+    mask = Column(String, nullable=True)
+    type = Column(String)
+    subtype = Column(String, nullable=True)
+    current_balance = Column(Float, nullable=True)
+    available_balance = Column(Float, nullable=True)
+    iso_currency_code = Column(String, nullable=True)
+    limit = Column(Float, nullable=True)
+    last_updated = Column(Date)
+    raw_json = Column(JSON)
+
+    def __repr__(self):
+        return f"<Account(name='{self.name}', type='{self.type}', balance={self.current_balance})>"
+
 class CategoryRule(Base):
     __tablename__ = 'category_rules'
 
