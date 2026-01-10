@@ -9,3 +9,9 @@ dependencies = [
     "plotly>=6.5.0",
     "python-dotenv>=1.2.1",
 ]
+
+[dependency-groups]
+dev = [
+    "pre-commit>=4.5.1",
+    "ruff>=0.14.11",
+]
