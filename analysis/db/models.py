@@ -94,6 +94,9 @@ class Account(Base):
     available_balance = Column(Float, nullable=True)
     iso_currency_code = Column(String, nullable=True)
     limit = Column(Float, nullable=True)
+    apy = Column(Float, nullable=True)
+    interest_rate = Column(Float, nullable=True)
+    maturity_date = Column(Date, nullable=True)
     last_updated = Column(Date)
     raw_json = Column(JSON)
 

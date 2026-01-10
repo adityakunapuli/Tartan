@@ -12,6 +12,7 @@ from dotenv import load_dotenv
 
 from analysis.db.models import Transaction, InvestmentHolding, Security, InvestmentTransaction, Account
 from analysis.db.session import SessionLocal, init_db
+from analysis.schemas import AccountSchema
 
 # Load .env from project root
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -256,7 +257,8 @@ def sync_accounts(session, client, access_token):
             # Balances object
             balances = a.balances
             
-            acc_obj = Account(
+            # Create Pydantic Model (Validation Layer)
+            account_data = AccountSchema(
                 account_id=a.account_id,
                 name=a.name,
                 mask=a.mask,
@@ -266,8 +268,18 @@ def sync_accounts(session, client, access_token):
                 available_balance=balances.available,
                 iso_currency_code=balances.iso_currency_code,
                 limit=balances.limit,
-                last_updated=datetime.date.today(),
+                apy=getattr(a, 'apy', None),
+                interest_rate=getattr(a, 'interest_rate', None),
+                maturity_date=getattr(a, 'maturity_date', None),
+                # Pydantic model has raw_json as Optional[dict]
                 raw_json=a_dict_serializable
+            )
+            
+            # Create SQLAlchemy Model (Persistence Layer)
+            # We use model_dump to convert Pydantic model to dict
+            acc_obj = Account(
+                **account_data.model_dump(),
+                last_updated=datetime.date.today()
             )
             session.merge(acc_obj)
             count += 1

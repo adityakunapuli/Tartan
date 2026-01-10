@@ -7,6 +7,7 @@ dependencies = [
     "pandas>=2.3.3",
     "plaid-python>=38.0.0",
     "plotly>=6.5.0",
+    "pydantic>=2.12.5",
     "python-dotenv>=1.2.1",
 ]
 
