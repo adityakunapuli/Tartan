@@ -65,6 +65,9 @@ def query_llm(context_data):
         if content.startswith("```json"):
             content = content[7:-3]
         return json.loads(content).get('category', 'General')
+    except requests.exceptions.ConnectionError:
+        print(f"  -> Warning: LLM endpoint ({LLM_URL}) is unreachable. Skipping categorization.")
+        return None
     except Exception as e:
         print(f"LLM Error: {e}")
         return "General"
@@ -141,6 +144,9 @@ def run_categorization():
         # print(f"  Context: {json.dumps(stats)}")
         
         category = query_llm(context)
+        if category is None:
+            continue
+            
         print(f"  -> {category}")
         
         rule = CategoryRule(match_value=key, match_type=data['type'], category=category)
