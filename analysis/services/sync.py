@@ -42,9 +42,8 @@ def make_json_serializable(data):
         return data.isoformat()
     return data
 
-def sync_transactions(session, client, days=730):
+def sync_transactions(session, client, access_token, days=730):
     print(f"Syncing Transactions (last {days} days)...")
-    access_token = os.getenv('PLAID_ACCESS_TOKEN')
     
     end_date = datetime.date.today()
     start_date = end_date - datetime.timedelta(days=days)
@@ -105,10 +104,8 @@ def sync_transactions(session, client, days=730):
             
     print(f"  -> Total Transactions Synced: {total_retrieved}")
 
-def sync_holdings(session, client):
+def sync_holdings(session, client, access_token):
     print("Syncing Investment Holdings...")
-    # ... (existing holdings code is fine as is, it's a snapshot) ...
-    access_token = os.getenv('PLAID_ACCESS_TOKEN')
     
     try:
         request = InvestmentsHoldingsGetRequest(access_token=access_token)
@@ -161,9 +158,8 @@ def sync_holdings(session, client):
         print(f"  -> Error: {e}")
         session.rollback()
 
-def sync_investment_transactions(session, client, days=730):
+def sync_investment_transactions(session, client, access_token, days=730):
     print(f"Syncing Investment Transactions (last {days} days)...")
-    access_token = os.getenv('PLAID_ACCESS_TOKEN')
     
     end_date = datetime.date.today()
     start_date = end_date - datetime.timedelta(days=days)
@@ -251,9 +247,22 @@ def run_sync():
     session = SessionLocal()
     
     try:
-        sync_transactions(session, client)
-        sync_holdings(session, client)
-        sync_investment_transactions(session, client)
+        # Support multiple tokens comma-separated
+        access_tokens_str = os.getenv('PLAID_ACCESS_TOKEN', '')
+        access_tokens = [t.strip() for t in access_tokens_str.split(',') if t.strip()]
+        
+        if not access_tokens:
+            print("No PLAID_ACCESS_TOKEN found in .env")
+            return
+
+        print(f"Found {len(access_tokens)} access token(s).")
+
+        for i, token in enumerate(access_tokens):
+            print(f"\n--- Syncing Institution {i+1}/{len(access_tokens)} ---")
+            sync_transactions(session, client, token)
+            sync_holdings(session, client, token)
+            sync_investment_transactions(session, client, token)
+            
     finally:
         session.close()
 
