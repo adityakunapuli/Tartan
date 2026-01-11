@@ -4,8 +4,8 @@ import requests
 import json
 import statistics
 from collections import Counter
-from sqlalchemy import select
-from analysis.db.session import SessionLocal
+from sqlmodel import select, Session
+from analysis.db.session import engine
 from analysis.db.models import Transaction, CategoryRule
 from analysis.utils import clean_name
 
@@ -42,7 +42,7 @@ Output must be a JSON object with keys "category" and "flow_type".
 CRITICAL LOGIC RULES:
 - "TRANSFER": 
     - Credit Card Payments (e.g. "Payment to Visa", "Autopay", "Chase Card").
-    - Loan Payments (e.g. "Bank Name Auto Loan", "Toyota Financial", "Mortgage Payment").
+    - Loan Payments (e.g. "Auto Loan", "Mortgage Payment").
     - Transfers between accounts (e.g. "Transfer to Savings", "Zelle to self").
     - Investment deposits.
     - These are balance sheet movements, NOT spending.
@@ -53,21 +53,22 @@ CRITICAL LOGIC RULES:
     - If it buys a good or service, it is an EXPENSE.
 
 Examples:
-- "Payment to Chase Card" -> {{"category": "Transfer", "flow_type": "TRANSFER"}}
-- "Bank Name Auto Loan" -> {{"category": "Transfer", "flow_type": "TRANSFER"}}
-- "Giant Eagle" -> {{"category": "Groceries", "flow_type": "EXPENSE"}}
+- "Payment to Credit Card" -> {{"category": "Transfer", "flow_type": "TRANSFER"}}
+- "Bank Auto Loan" -> {{"category": "Transfer", "flow_type": "TRANSFER"}}
+- "Grocery Store" -> {{"category": "Groceries", "flow_type": "EXPENSE"}}
 - "Payroll Deposit" -> {{"category": "Income", "flow_type": "INCOME"}}
 """
 
 
-def query_llm(context_data: dict) -> tuple[str, str]:
+def query_llm(context_data: dict) -> tuple[str, str] | None:
     """Queries the local LLM to categorize a transaction pattern.
 
     Args:
         context_data (dict): The context for the transaction pattern.
 
     Returns:
-        tuple[str, str]: (category, flow_type). Returns ("General", "EXPENSE") on failure.
+        tuple[str, str] | None: (category, flow_type). Returns ("General", "EXPENSE") on failure.
+        Returns None if the endpoint is unreachable.
     """
     payload = {
         "messages": [
@@ -130,75 +131,73 @@ def get_cluster_stats(transactions: list) -> dict:
 
 def run_categorization() -> None:
     """Orchestrates the categorization process for uncategorized transaction patterns."""
-    session = SessionLocal()
+    with Session(engine) as session:
+        # 1. Fetch all transactions
+        all_tx = session.exec(select(Transaction)).all()
+        print(f"Loaded {len(all_tx)} transactions.")
 
-    # 1. Fetch all transactions
-    all_tx = session.execute(select(Transaction)).scalars().all()
-    print(f"Loaded {len(all_tx)} transactions.")
+        # 2. Group by Key
+        # Priority: Merchant Name -> Cleaned Name
+        clusters = {}
 
-    # 2. Group by Key
-    # Priority: Merchant Name -> Cleaned Name
-    clusters = {}
+        for tx in all_tx:
+            if tx.merchant_name:
+                key = tx.merchant_name
+                ktype = "merchant_name"
+            else:
+                key = clean_name(tx.name)
+                ktype = "pattern"
 
-    for tx in all_tx:
-        if tx.merchant_name:
-            key = tx.merchant_name
-            ktype = "merchant_name"
-        else:
-            key = clean_name(tx.name)
-            ktype = "pattern"
+            if key not in clusters:
+                clusters[key] = {"type": ktype, "txs": []}
+            clusters[key]["txs"].append(tx)
 
-        if key not in clusters:
-            clusters[key] = {"type": ktype, "txs": []}
-        clusters[key]["txs"].append(tx)
+        print(f"Identified {len(clusters)} unique patterns/merchants.")
 
-    print(f"Identified {len(clusters)} unique patterns/merchants.")
+        # 3. Process Clusters
+        new_rules = 0
 
-    # 3. Process Clusters
-    new_rules = 0
+        for key, data in clusters.items():
+            # Check if rule exists
+            existing = session.exec(
+                select(CategoryRule).where(
+                    (CategoryRule.match_value == key)
+                    & (CategoryRule.match_type == data["type"])
+                )
+            ).first()
 
-    for key, data in clusters.items():
-        # Check if rule exists
-        existing = session.execute(
-            select(CategoryRule).where(
-                (CategoryRule.match_value == key)
-                & (CategoryRule.match_type == data["type"])
+            if existing:
+                continue
+
+            # Analyze Cluster
+            stats = get_cluster_stats(data["txs"])
+
+            context = {"pattern": key, "type": data["type"], **stats}
+
+            print(f"Categorizing [{data['type']}]: {key} ({len(data['txs'])} txs)...")
+            # print(f"  Context: {json.dumps(stats)}")
+
+            result = query_llm(context)
+            if result is None:
+                continue
+
+            category, flow_type = result
+            print(f"  -> {category} ({flow_type})")
+
+            rule = CategoryRule(
+                match_value=key,
+                match_type=data["type"],
+                category=category,
+                flow_type=flow_type,
             )
-        ).scalar_one_or_none()
+            session.add(rule)
+            new_rules += 1
 
-        if existing:
-            continue
+            if new_rules % 10 == 0:
+                session.commit()
 
-        # Analyze Cluster
-        stats = get_cluster_stats(data["txs"])
-
-        context = {"pattern": key, "type": data["type"], **stats}
-
-        print(f"Categorizing [{data['type']}]: {key} ({len(data['txs'])} txs)...")
-        # print(f"  Context: {json.dumps(stats)}")
-
-        result = query_llm(context)
-        if result is None:
-            continue
-
-        category, flow_type = result
-        print(f"  -> {category} ({flow_type})")
-
-        rule = CategoryRule(
-            match_value=key,
-            match_type=data["type"],
-            category=category,
-            flow_type=flow_type,
-        )
-        session.add(rule)
-        new_rules += 1
-
-        if new_rules % 10 == 0:
-            session.commit()
-
-    session.commit()
-    print(f"Categorization complete. Added {new_rules} new rules.")
-    session.close()
+        session.commit()
+        print(f"Categorization complete. Added {new_rules} new rules.")
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@
 
 import os
 import datetime
+import json
 import plaid
 from plaid.api import plaid_api
 from plaid.model.transactions_sync_request import TransactionsSyncRequest
@@ -16,10 +17,9 @@ from plaid.model.accounts_get_request import AccountsGetRequest
 from plaid.model.institutions_get_by_id_request import InstitutionsGetByIdRequest
 from plaid.model.country_code import CountryCode
 from dotenv import load_dotenv
-import json
 from sqlmodel import select, delete, Session
 
-from analysis.db.sqlmodel_models import (
+from analysis.db.models import (
     Transaction,
     InvestmentHolding,
     Security,
@@ -149,7 +149,7 @@ def sync_transactions(session: Session, client: plaid_api.PlaidApi, access_token
             # Update Cursor
             cursor = response["next_cursor"]
             plaid_item.next_cursor = cursor
-            session.add(plaid_item) # Explicit add for SQLModel update
+            session.add(plaid_item)  # Explicit add for SQLModel update
             session.commit()
 
             if not response["has_more"]:
@@ -397,7 +397,7 @@ def sync_accounts(session: Session, client: plaid_api.PlaidApi, access_token: st
                 last_updated=datetime.date.today(),
                 raw_json=a_dict_serializable,
             )
-            
+
             # Use merge to upsert
             session.merge(acc_obj)
             count += 1

@@ -1,35 +1,7 @@
 """Reporting script for deep analysis of transaction patterns and anomalies."""
 
-import re
 from analysis.services.data_layer import get_transactions_df
-
-
-def clean_name(name: str) -> str:
-    """Cleans the transaction name by removing common prefixes, dates, and special characters.
-
-    Args:
-        name (str): The raw transaction name.
-
-    Returns:
-        str: The cleaned and normalized transaction name.
-    """
-    if not name:
-        return ""
-    # Remove common prefixes
-    name = re.sub(
-        r"^(CHECKCARD|PURCHASE|POS PURCHASE|DEBIT CARD PURCHASE)\s*\d*\s*",
-        "",
-        name,
-        flags=re.IGNORECASE,
-    )
-    # Remove dates (MM/DD, MM-DD)
-    name = re.sub(r"\b\d{1,2}[/-]\d{1,2}\b", "", name)
-    # Remove large number sequences (IDs, card numbers) - 4 or more digits
-    name = re.sub(r"\b\d{4,}\b", "", name)
-    # Remove special chars
-    name = re.sub(r"[^\w\s]", " ", name)
-    # Collapse whitespace
-    return " ".join(name.split()).upper()
+from analysis.utils import clean_name
 
 
 def analyze_deep_data() -> None:
@@ -54,7 +26,9 @@ def analyze_deep_data() -> None:
         print(clusters)
 
         print("\n--- Example Raw Names for Top Clusters ---")
-        for pattern in clusters.index[:5]:
+        # Ensure we iterate over the index as values
+        cluster_patterns = clusters.index.tolist()
+        for pattern in cluster_patterns[:5]:
             print(f"\nPattern: '{pattern}'")
             examples = (
                 missing_merch[missing_merch["cleaned_name"] == pattern]["name"]
@@ -73,7 +47,8 @@ def analyze_deep_data() -> None:
 
     # Check what these amounts correspond to
     print("\n--- Potential Subscriptions (by Amount) ---")
-    for amt in recurring.index[:5]:
+    recurring_amounts = recurring.index.tolist()
+    for amt in recurring_amounts[:5]:
         print(f"\nAmount: ${amt}")
         # Show merchants/names associated with this amount
         subset = df[df["amount"] == amt]

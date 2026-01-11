@@ -49,5 +49,6 @@ def check_institution(name):
 
 
 if __name__ == "__main__":
-    check_institution("E-TRADE")
-    check_institution("Marcus")
+    # Example usage:
+    # check_institution("Your Bank Name")
+    pass
