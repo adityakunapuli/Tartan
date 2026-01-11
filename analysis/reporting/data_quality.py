@@ -1,6 +1,9 @@
+"""Reporting script for analyzing the quality and consistency of transaction data."""
+
 from analysis.services.data_layer import get_transactions_df
 
-def analyze_transaction_data():
+def analyze_transaction_data() -> None:
+    """Analyzes transaction data for merchant coverage and category consistency."""
     df = get_transactions_df()
     if df.empty:
         print("No transactions found to analyze.")

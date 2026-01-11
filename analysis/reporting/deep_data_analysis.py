@@ -1,7 +1,17 @@
-from analysis.services.data_layer import get_transactions_df
-import re
+"""Reporting script for deep analysis of transaction patterns and anomalies."""
 
-def clean_name(name):
+import re
+from analysis.services.data_layer import get_transactions_df
+
+def clean_name(name: str) -> str:
+    """Cleans the transaction name by removing common prefixes, dates, and special characters.
+
+    Args:
+        name (str): The raw transaction name.
+
+    Returns:
+        str: The cleaned and normalized transaction name.
+    """
     if not name:
         return ""
     # Remove common prefixes
@@ -15,7 +25,8 @@ def clean_name(name):
     # Collapse whitespace
     return ' '.join(name.split()).upper()
 
-def analyze_deep_data():
+def analyze_deep_data() -> None:
+    """Performs deep clustering and frequency analysis on transaction data."""
     df = get_transactions_df()
     if df.empty:
         print("No transactions found.")

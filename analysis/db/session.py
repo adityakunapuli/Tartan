@@ -1,6 +1,9 @@
+"""Database session management."""
+
 import os
+from typing import Iterator
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import sessionmaker, Session
 from .models import Base
 
 # Construct absolute path to the database file
@@ -14,10 +17,16 @@ DB_PATH = f"sqlite:///{DB_FILE}"
 engine = create_engine(DB_PATH)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-def init_db():
+def init_db() -> None:
+    """Initializes the database by creating all tables defined in models."""
     Base.metadata.create_all(bind=engine)
 
-def get_db():
+def get_db() -> Iterator[Session]:
+    """Provides a transactional scope around a series of operations.
+
+    Yields:
+        Session: A SQLAlchemy session object.
+    """
     db = SessionLocal()
     try:
         yield db

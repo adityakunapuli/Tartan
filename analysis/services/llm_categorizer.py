@@ -1,8 +1,11 @@
+"""Service for categorizing transactions using a local LLM."""
+
 import requests
 import json
 import re
 import statistics
 from collections import Counter
+from typing import Optional
 from sqlalchemy import select
 from analysis.db.session import SessionLocal
 from analysis.db.models import Transaction, CategoryRule
@@ -33,7 +36,15 @@ Rules:
 - "Loan" -> "Financial"
 """
 
-def clean_name(name):
+def clean_name(name: str) -> str:
+    """Cleans the transaction name by removing prefixes, dates, and special characters.
+
+    Args:
+        name (str): The raw transaction name.
+
+    Returns:
+        str: The cleaned name.
+    """
     if not name:
         return "UNKNOWN"
     # Remove common prefixes
@@ -46,7 +57,15 @@ def clean_name(name):
     name = re.sub(r'[^\w\s]', ' ', name)
     return ' '.join(name.split()).upper()
 
-def query_llm(context_data):
+def query_llm(context_data: dict) -> Optional[str]:
+    """Queries the local LLM to categorize a transaction pattern.
+
+    Args:
+        context_data (dict): The context for the transaction pattern.
+
+    Returns:
+        str | None: The suggested category, or None if the LLM is unreachable.
+    """
     payload = {
         "messages": [
             {"role": "system", "content": SYSTEM_PROMPT},
@@ -72,7 +91,15 @@ def query_llm(context_data):
         print(f"LLM Error: {e}")
         return "General"
 
-def get_cluster_stats(transactions):
+def get_cluster_stats(transactions: list) -> dict:
+    """Calculates statistics for a cluster of transactions.
+
+    Args:
+        transactions (list): List of Transaction objects.
+
+    Returns:
+        dict: A dictionary of statistics.
+    """
     if not transactions:
         return {}
     
@@ -91,7 +118,8 @@ def get_cluster_stats(transactions):
         "plaid_categories": list(set(str(t.category) for t in transactions[:3]))
     }
 
-def run_categorization():
+def run_categorization() -> None:
+    """Orchestrates the categorization process for uncategorized transaction patterns."""
     session = SessionLocal()
     
     # 1. Fetch all transactions

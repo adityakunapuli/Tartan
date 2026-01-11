@@ -1,5 +1,8 @@
+"""Service for syncing financial data from Plaid to the local database."""
+
 import os
 import datetime
+from typing import Any
 import plaid
 from plaid.api import plaid_api
 from plaid.model.transactions_get_request import TransactionsGetRequest
@@ -18,7 +21,15 @@ from analysis.schemas import AccountSchema
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 load_dotenv(os.path.join(BASE_DIR, '.env'), override=True)
 
-def get_plaid_client():
+def get_plaid_client() -> plaid_api.PlaidApi:
+    """Initializes and returns the Plaid API client.
+
+    Returns:
+        plaid_api.PlaidApi: The authenticated Plaid client.
+
+    Raises:
+        ValueError: If PLAID_CLIENT_ID or PLAID_SECRET are missing.
+    """
     client_id = os.getenv('PLAID_CLIENT_ID')
     secret = os.getenv('PLAID_SECRET')
     env = os.getenv('PLAID_ENV', 'sandbox')
@@ -34,8 +45,15 @@ def get_plaid_client():
     api_client = plaid.ApiClient(configuration)
     return plaid_api.PlaidApi(api_client)
 
-def make_json_serializable(data):
-    """Recursively convert datetime objects to ISO format strings."""
+def make_json_serializable(data: Any) -> Any:
+    """Recursively converts datetime objects to ISO format strings.
+
+    Args:
+        data (Any): The data to serialize (dict, list, or scalar).
+
+    Returns:
+        Any: The JSON-serializable data.
+    """
     if isinstance(data, dict):
         return {k: make_json_serializable(v) for k, v in data.items()}
     elif isinstance(data, list):
@@ -44,7 +62,15 @@ def make_json_serializable(data):
         return data.isoformat()
     return data
 
-def sync_transactions(session, client, access_token, days=730):
+def sync_transactions(session: Any, client: Any, access_token: str, days: int = 730) -> None:
+    """Fetches and saves transactions for the given access token.
+
+    Args:
+        session (Any): Database session.
+        client (Any): Plaid API client.
+        access_token (str): Plaid access token.
+        days (int, optional): Number of days of history to fetch. Defaults to 730.
+    """
     print(f"Syncing Transactions (last {days} days)...")
     
     end_date = datetime.date.today()
@@ -106,7 +132,14 @@ def sync_transactions(session, client, access_token, days=730):
             
     print(f"  -> Total Transactions Synced: {total_retrieved}")
 
-def sync_holdings(session, client, access_token):
+def sync_holdings(session: Any, client: Any, access_token: str) -> None:
+    """Fetches and saves investment holdings.
+
+    Args:
+        session (Any): Database session.
+        client (Any): Plaid API client.
+        access_token (str): Plaid access token.
+    """
     print("Syncing Investment Holdings...")
     
     try:
@@ -160,7 +193,15 @@ def sync_holdings(session, client, access_token):
         print(f"  -> Error: {e}")
         session.rollback()
 
-def sync_investment_transactions(session, client, access_token, days=730):
+def sync_investment_transactions(session: Any, client: Any, access_token: str, days: int = 730) -> None:
+    """Fetches and saves investment transactions.
+
+    Args:
+        session (Any): Database session.
+        client (Any): Plaid API client.
+        access_token (str): Plaid access token.
+        days (int, optional): Number of days of history to fetch. Defaults to 730.
+    """
     print(f"Syncing Investment Transactions (last {days} days)...")
     
     end_date = datetime.date.today()
@@ -243,7 +284,14 @@ def sync_investment_transactions(session, client, access_token, days=730):
     
     print(f"  -> Total Investment Transactions Synced: {total_retrieved}")
 
-def sync_accounts(session, client, access_token):
+def sync_accounts(session: Any, client: Any, access_token: str) -> None:
+    """Fetches and saves account balances and metadata.
+
+    Args:
+        session (Any): Database session.
+        client (Any): Plaid API client.
+        access_token (str): Plaid access token.
+    """
     print("Syncing Accounts (Balances)...")
     try:
         request = AccountsGetRequest(access_token=access_token)
@@ -291,7 +339,8 @@ def sync_accounts(session, client, access_token):
         print(f"  -> Error: {e}")
         session.rollback()
 
-def run_sync():
+def run_sync() -> None:
+    """Orchestrates the synchronization process for all configured access tokens."""
     init_db()
     client = get_plaid_client()
     session = SessionLocal()

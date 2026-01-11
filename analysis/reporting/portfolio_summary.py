@@ -1,6 +1,9 @@
+"""Reporting script for generating portfolio summaries and spending analysis."""
+
 from analysis.services.data_layer import get_enriched_transactions_df, get_denormalized_holdings, get_investment_transactions_df
 
-def print_spending_by_category():
+def print_spending_by_category() -> None:
+    """Prints a summary of spending grouped by enriched category."""
     print("\n--- SPENDING ANALYSIS (Enriched) ---")
     df_tx = get_enriched_transactions_df()
 
@@ -20,7 +23,8 @@ def print_spending_by_category():
 
     print(category_sum)
 
-def print_portfolio_summary():
+def print_portfolio_summary() -> None:
+    """Prints a summary of the investment portfolio including total value and top holdings."""
     print("\n--- PORTFOLIO SUMMARY ---")
     df_inv = get_denormalized_holdings()
 
@@ -36,7 +40,8 @@ def print_portfolio_summary():
     print("\nTop Holdings:")
     print(df_inv[['security_name', 'ticker_symbol', 'institution_value', 'quantity']].sort_values(by='institution_value', ascending=False).head())
 
-def print_investment_activity():
+def print_investment_activity() -> None:
+    """Prints recent investment transaction activity."""
     print("\n--- INVESTMENT ACTIVITY ---")
     df_it = get_investment_transactions_df()
     
@@ -47,7 +52,8 @@ def print_investment_activity():
     print(f"Loaded {len(df_it)} investment transactions.")
     print(df_it[['date', 'type', 'name', 'amount', 'price']].sort_values(by='date', ascending=False).head())
 
-def print_historical_performance():
+def print_historical_performance() -> None:
+    """Prints historical investment performance metrics including fees and net flow."""
     print("\n--- HISTORICAL PERFORMANCE (Last 2 Years) ---")
     df_it = get_investment_transactions_df()
     

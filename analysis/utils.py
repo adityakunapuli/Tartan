@@ -1,6 +1,16 @@
+"""Utility functions for data cleaning and processing."""
+
 import re
 
-def clean_name(name):
+def clean_name(name: str) -> str:
+    """Cleans the transaction name by removing common prefixes, dates, and special characters.
+
+    Args:
+        name (str): The raw transaction name.
+
+    Returns:
+        str: The cleaned and normalized transaction name.
+    """
     if not name:
         return "UNKNOWN"
     # Remove common prefixes

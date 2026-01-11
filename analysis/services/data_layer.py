@@ -1,11 +1,19 @@
+"""Data access layer for retrieving financial data as DataFrames."""
+
+from typing import Optional
 import pandas as pd
 from analysis.db.session import engine
 from analysis.utils import clean_name
 
-def get_denormalized_holdings(date_captured=None) -> pd.DataFrame:
-    """
-    Returns a DataFrame of investment holdings joined with security details.
-    If date_captured is None, returns the latest snapshot available.
+def get_denormalized_holdings(date_captured: Optional[str] = None) -> pd.DataFrame:
+    """Returns a DataFrame of investment holdings joined with security details.
+
+    Args:
+        date_captured (str | None): The date to retrieve holdings for. 
+            If None, returns the latest snapshot.
+
+    Returns:
+        pd.DataFrame: DataFrame containing holdings and security data.
     """
     query = """
     SELECT 
@@ -32,8 +40,10 @@ def get_denormalized_holdings(date_captured=None) -> pd.DataFrame:
     return pd.read_sql(query, engine)
 
 def get_transactions_df() -> pd.DataFrame:
-    """
-    Returns all transactions as a DataFrame with parsed dates.
+    """Returns all transactions as a DataFrame with parsed dates.
+
+    Returns:
+        pd.DataFrame: DataFrame containing all transactions.
     """
     df = pd.read_sql("SELECT * FROM transactions", engine)
     if not df.empty:
@@ -41,8 +51,10 @@ def get_transactions_df() -> pd.DataFrame:
     return df
 
 def get_enriched_transactions_df() -> pd.DataFrame:
-    """
-    Returns transactions with an 'enriched_category' column applied from CategoryRules.
+    """Returns transactions with an 'enriched_category' column applied from CategoryRules.
+
+    Returns:
+        pd.DataFrame: DataFrame containing enriched transactions.
     """
     df = get_transactions_df()
     if df.empty:
@@ -62,7 +74,7 @@ def get_enriched_transactions_df() -> pd.DataFrame:
     # pattern_map: cleaned_name_pattern -> category
     pattern_map = rules[rules['match_type'] == 'pattern'].set_index('match_value')['category'].to_dict()
     
-    def apply_rule(row):
+    def apply_rule(row: pd.Series) -> str:
         # 1. Try Merchant Match
         if row['merchant_name'] and row['merchant_name'] in merchant_map:
             return merchant_map[row['merchant_name']]
@@ -78,8 +90,10 @@ def get_enriched_transactions_df() -> pd.DataFrame:
     return df
 
 def get_investment_transactions_df() -> pd.DataFrame:
-    """
-    Returns all investment transactions joined with securities.
+    """Returns all investment transactions joined with securities.
+
+    Returns:
+        pd.DataFrame: DataFrame containing investment transactions and security info.
     """
     query = """
     SELECT 
