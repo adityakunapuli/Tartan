@@ -5,6 +5,7 @@ from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
 
+
 class Transaction(Base):
     """SQLAlchemy model for bank transactions.
 
@@ -22,7 +23,8 @@ class Transaction(Base):
         payment_channel (str): Method of payment (e.g., 'in store').
         raw_json (dict): Full raw JSON from Plaid.
     """
-    __tablename__ = 'transactions'
+
+    __tablename__ = "transactions"
 
     transaction_id = Column(String, primary_key=True)
     account_id = Column(String, index=True)
@@ -40,6 +42,7 @@ class Transaction(Base):
 
     def __repr__(self):
         return f"<Transaction(id='{self.transaction_id}', date='{self.date}', amount={self.amount}, name='{self.name}')>"
+
 
 class InvestmentTransaction(Base):
     """SQLAlchemy model for investment transactions.
@@ -59,11 +62,12 @@ class InvestmentTransaction(Base):
         currency (str): ISO currency code.
         raw_json (dict): Full raw JSON from Plaid.
     """
-    __tablename__ = 'investment_transactions'
+
+    __tablename__ = "investment_transactions"
 
     investment_transaction_id = Column(String, primary_key=True)
     account_id = Column(String, index=True)
-    security_id = Column(String, ForeignKey('securities.security_id'), index=True)
+    security_id = Column(String, ForeignKey("securities.security_id"), index=True)
     date = Column(Date)
     name = Column(String)
     quantity = Column(Float)
@@ -80,6 +84,7 @@ class InvestmentTransaction(Base):
     def __repr__(self):
         return f"<InvestmentTransaction(id='{self.investment_transaction_id}', date='{self.date}', type='{self.type}', amount={self.amount})>"
 
+
 class InvestmentHolding(Base):
     """SQLAlchemy model for investment holdings (positions).
 
@@ -95,12 +100,13 @@ class InvestmentHolding(Base):
         currency (str): ISO currency code.
         raw_json (dict): Full raw JSON from Plaid.
     """
-    __tablename__ = 'investment_holdings'
+
+    __tablename__ = "investment_holdings"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     date_captured = Column(Date, index=True)
     account_id = Column(String, index=True)
-    security_id = Column(String, ForeignKey('securities.security_id'), index=True)
+    security_id = Column(String, ForeignKey("securities.security_id"), index=True)
     quantity = Column(Float)
     institution_price = Column(Float)
     institution_value = Column(Float)
@@ -112,6 +118,7 @@ class InvestmentHolding(Base):
 
     def __repr__(self):
         return f"<InvestmentHolding(date='{self.date_captured}', security_id='{self.security_id}', value={self.institution_value})>"
+
 
 class Security(Base):
     """SQLAlchemy model for securities (stocks, funds, etc.).
@@ -128,7 +135,8 @@ class Security(Base):
         is_cash_equivalent (bool): Whether it is a cash-like asset.
         raw_json (dict): Full raw JSON from Plaid.
     """
-    __tablename__ = 'securities'
+
+    __tablename__ = "securities"
 
     security_id = Column(String, primary_key=True)
     name = Column(String, nullable=True)
@@ -145,6 +153,7 @@ class Security(Base):
 
     def __repr__(self):
         return f"<Security(name='{self.name}', ticker='{self.ticker_symbol}')>"
+
 
 class Account(Base):
     """SQLAlchemy model for financial accounts.
@@ -165,7 +174,8 @@ class Account(Base):
         last_updated (date): Date of last sync.
         raw_json (dict): Full raw JSON from Plaid.
     """
-    __tablename__ = 'accounts'
+
+    __tablename__ = "accounts"
 
     account_id = Column(String, primary_key=True)
     name = Column(String)
@@ -185,6 +195,7 @@ class Account(Base):
     def __repr__(self):
         return f"<Account(name='{self.name}', type='{self.type}', balance={self.current_balance})>"
 
+
 class CategoryRule(Base):
     """SQLAlchemy model for transaction categorization rules.
 
@@ -194,17 +205,38 @@ class CategoryRule(Base):
         match_type (str): Either 'merchant_name' or 'pattern'.
         category (str): The assigned category.
     """
-    __tablename__ = 'category_rules'
+
+    __tablename__ = "category_rules"
 
     id = Column(Integer, primary_key=True, autoincrement=True)
-    # The key to match against. 
+    # The key to match against.
     # If merchant_name exists in transaction, we match against 'merchant_name'.
     # If not, we match against 'name'.
-    match_value = Column(String, unique=True, index=True) 
-    match_type = Column(String) # 'merchant_name' or 'name'
-    flow_type = Column(String) # 'INCOME', 'EXPENSE', 'TRANSFER'
-    category = Column(String) # The standardized category (e.g. "Groceries")
-    
+    match_value = Column(String, unique=True, index=True)
+    match_type = Column(String)  # 'merchant_name' or 'name'
+    flow_type = Column(String)  # 'INCOME', 'EXPENSE', 'TRANSFER'
+    category = Column(String)  # The standardized category (e.g. "Groceries")
+
     def __repr__(self):
         return f"<CategoryRule(match='{self.match_value}', category='{self.category}', flow='{self.flow_type}')>"
 
+
+class PlaidItem(Base):
+    """SQLAlchemy model for Plaid Items (connections).
+
+    Attributes:
+        access_token (str): The Plaid access token (Primary Key).
+        item_id (str): The Plaid item ID.
+        next_cursor (str): The cursor for incremental transaction syncing.
+    """
+
+    __tablename__ = "plaid_items"
+
+    access_token = Column(String, primary_key=True)
+    item_id = Column(String, nullable=True)
+    institution_id = Column(String, nullable=True)
+    institution_name = Column(String, nullable=True)
+    next_cursor = Column(String, nullable=True)
+
+    def __repr__(self):
+        return f"<PlaidItem(name='{self.institution_name}', item_id='{self.item_id}')>"

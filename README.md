@@ -12,7 +12,7 @@ This project is split into two distinct parts:
 graph TD
     subgraph "External"
         PlaidAPI[Plaid API]
-        LocalLLM[Local LLM (Llama.cpp)]
+        LocalLLM["Local LLM (Llama.cpp)"]
     end
 
     subgraph "Local Environment"

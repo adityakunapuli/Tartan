@@ -5,11 +5,12 @@ import pandas as pd
 from analysis.db.session import engine
 from analysis.utils import clean_name
 
+
 def get_denormalized_holdings(date_captured: Optional[str] = None) -> pd.DataFrame:
     """Returns a DataFrame of investment holdings joined with security details.
 
     Args:
-        date_captured (str | None): The date to retrieve holdings for. 
+        date_captured (str | None): The date to retrieve holdings for.
             If None, returns the latest snapshot.
 
     Returns:
@@ -30,14 +31,15 @@ def get_denormalized_holdings(date_captured: Optional[str] = None) -> pd.DataFra
     FROM investment_holdings h
     LEFT JOIN securities s ON h.security_id = s.security_id
     """
-    
+
     if date_captured:
         query += f" WHERE h.date_captured = '{date_captured}'"
     else:
         # Default to latest date
         query += " WHERE h.date_captured = (SELECT MAX(date_captured) FROM investment_holdings)"
-        
+
     return pd.read_sql(query, engine)
+
 
 def get_transactions_df() -> pd.DataFrame:
     """Returns all transactions as a DataFrame with parsed dates.
@@ -47,8 +49,9 @@ def get_transactions_df() -> pd.DataFrame:
     """
     df = pd.read_sql("SELECT * FROM transactions", engine)
     if not df.empty:
-        df['date'] = pd.to_datetime(df['date'])
+        df["date"] = pd.to_datetime(df["date"])
     return df
+
 
 def get_enriched_transactions_df() -> pd.DataFrame:
     """Returns transactions with an 'enriched_category' column applied from CategoryRules.
@@ -59,40 +62,63 @@ def get_enriched_transactions_df() -> pd.DataFrame:
     df = get_transactions_df()
     if df.empty:
         return df
-    
+
     # Load rules
     rules = pd.read_sql("SELECT * FROM category_rules", engine)
-    
+
     if rules.empty:
-        df['enriched_category'] = 'Uncategorized'
-        df['flow_type'] = 'EXPENSE'
+        df["enriched_category"] = "Uncategorized"
+        df["flow_type"] = "EXPENSE"
         return df
-        
+
     # Create lookup dicts
     # Helper to pack category and flow_type
-    rules['value_dict'] = rules.apply(lambda x: {'category': x['category'], 'flow_type': x['flow_type']}, axis=1)
-    
-    merchant_map = rules[rules['match_type'] == 'merchant_name'].set_index('match_value')['value_dict'].to_dict()
-    pattern_map = rules[rules['match_type'] == 'pattern'].set_index('match_value')['value_dict'].to_dict()
-    
+    rules["value_dict"] = rules.apply(
+        lambda x: {"category": x["category"], "flow_type": x["flow_type"]}, axis=1
+    )
+
+    merchant_map = (
+        rules[rules["match_type"] == "merchant_name"]
+        .set_index("match_value")["value_dict"]
+        .to_dict()
+    )
+    pattern_map = (
+        rules[rules["match_type"] == "pattern"]
+        .set_index("match_value")["value_dict"]
+        .to_dict()
+    )
+
     def apply_rule(row: pd.Series) -> pd.Series:
-        default = pd.Series({'enriched_category': 'Uncategorized', 'flow_type': 'EXPENSE'})
-        
+        default = pd.Series(
+            {"enriched_category": "Uncategorized", "flow_type": "EXPENSE"}
+        )
+
         # 1. Try Merchant Match
-        if row['merchant_name'] and row['merchant_name'] in merchant_map:
-            match = merchant_map[row['merchant_name']]
-            return pd.Series({'enriched_category': match['category'], 'flow_type': match['flow_type']})
-            
+        if row["merchant_name"] and row["merchant_name"] in merchant_map:
+            match = merchant_map[row["merchant_name"]]
+            return pd.Series(
+                {
+                    "enriched_category": match["category"],
+                    "flow_type": match["flow_type"],
+                }
+            )
+
         # 2. Try Pattern Match
-        c_name = clean_name(row['name'])
+        c_name = clean_name(row["name"])
         if c_name in pattern_map:
             match = pattern_map[c_name]
-            return pd.Series({'enriched_category': match['category'], 'flow_type': match['flow_type']})
-            
+            return pd.Series(
+                {
+                    "enriched_category": match["category"],
+                    "flow_type": match["flow_type"],
+                }
+            )
+
         return default
 
-    df[['enriched_category', 'flow_type']] = df.apply(apply_rule, axis=1)
+    df[["enriched_category", "flow_type"]] = df.apply(apply_rule, axis=1)
     return df
+
 
 def get_investment_transactions_df() -> pd.DataFrame:
     """Returns all investment transactions joined with securities.
@@ -111,5 +137,5 @@ def get_investment_transactions_df() -> pd.DataFrame:
     """
     df = pd.read_sql(query, engine)
     if not df.empty:
-        df['date'] = pd.to_datetime(df['date'])
+        df["date"] = pd.to_datetime(df["date"])
     return df

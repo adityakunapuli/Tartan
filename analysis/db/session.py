@@ -17,9 +17,11 @@ DB_PATH = f"sqlite:///{DB_FILE}"
 engine = create_engine(DB_PATH)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+
 def init_db() -> None:
     """Initializes the database by creating all tables defined in models."""
     Base.metadata.create_all(bind=engine)
+
 
 def get_db() -> Iterator[Session]:
     """Provides a transactional scope around a series of operations.
