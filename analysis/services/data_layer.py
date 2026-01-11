@@ -65,28 +65,33 @@ def get_enriched_transactions_df() -> pd.DataFrame:
     
     if rules.empty:
         df['enriched_category'] = 'Uncategorized'
+        df['flow_type'] = 'EXPENSE'
         return df
         
     # Create lookup dicts
-    # merchant_map: merchant_name -> category
-    merchant_map = rules[rules['match_type'] == 'merchant_name'].set_index('match_value')['category'].to_dict()
+    # Helper to pack category and flow_type
+    rules['value_dict'] = rules.apply(lambda x: {'category': x['category'], 'flow_type': x['flow_type']}, axis=1)
     
-    # pattern_map: cleaned_name_pattern -> category
-    pattern_map = rules[rules['match_type'] == 'pattern'].set_index('match_value')['category'].to_dict()
+    merchant_map = rules[rules['match_type'] == 'merchant_name'].set_index('match_value')['value_dict'].to_dict()
+    pattern_map = rules[rules['match_type'] == 'pattern'].set_index('match_value')['value_dict'].to_dict()
     
-    def apply_rule(row: pd.Series) -> str:
+    def apply_rule(row: pd.Series) -> pd.Series:
+        default = pd.Series({'enriched_category': 'Uncategorized', 'flow_type': 'EXPENSE'})
+        
         # 1. Try Merchant Match
         if row['merchant_name'] and row['merchant_name'] in merchant_map:
-            return merchant_map[row['merchant_name']]
+            match = merchant_map[row['merchant_name']]
+            return pd.Series({'enriched_category': match['category'], 'flow_type': match['flow_type']})
             
         # 2. Try Pattern Match
         c_name = clean_name(row['name'])
         if c_name in pattern_map:
-            return pattern_map[c_name]
+            match = pattern_map[c_name]
+            return pd.Series({'enriched_category': match['category'], 'flow_type': match['flow_type']})
             
-        return 'Uncategorized'
+        return default
 
-    df['enriched_category'] = df.apply(apply_rule, axis=1)
+    df[['enriched_category', 'flow_type']] = df.apply(apply_rule, axis=1)
     return df
 
 def get_investment_transactions_df() -> pd.DataFrame:

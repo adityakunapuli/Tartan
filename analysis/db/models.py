@@ -30,6 +30,7 @@ class Transaction(Base):
     name = Column(String)
     amount = Column(Float)
     currency = Column(String, nullable=True)
+    flow_type = Column(String, nullable=True)  # 'INCOME', 'EXPENSE', 'TRANSFER'
     category = Column(JSON, nullable=True)
     category_id = Column(String, nullable=True)
     pending = Column(Boolean)
@@ -201,8 +202,9 @@ class CategoryRule(Base):
     # If not, we match against 'name'.
     match_value = Column(String, unique=True, index=True) 
     match_type = Column(String) # 'merchant_name' or 'name'
+    flow_type = Column(String) # 'INCOME', 'EXPENSE', 'TRANSFER'
     category = Column(String) # The standardized category (e.g. "Groceries")
     
     def __repr__(self):
-        return f"<CategoryRule(match='{self.match_value}', category='{self.category}')>"
+        return f"<CategoryRule(match='{self.match_value}', category='{self.category}', flow='{self.flow_type}')>"
 

@@ -5,7 +5,6 @@ import json
 import re
 import statistics
 from collections import Counter
-from typing import Optional
 from sqlalchemy import select
 from analysis.db.session import SessionLocal
 from analysis.db.models import Transaction, CategoryRule
@@ -20,20 +19,29 @@ CATEGORIES = [
 
 SYSTEM_PROMPT = f"""
 You are a financial transaction categorizer.
-Your goal is to map a transaction pattern to exactly ONE of the following categories:
-{json.dumps(CATEGORIES)}
+Your goal is to map a transaction pattern to:
+1. A 'category' from the list: {json.dumps(CATEGORIES)}
+2. A 'flow_type' from: ["INCOME", "EXPENSE", "TRANSFER"]
 
-Input is a JSON object describing a cluster of transactions (pattern, sample names, amounts, dates).
-Output must be a JSON object with a single key "category".
-Rules:
-- "Venmo", "Zelle", "PayPal", "Wire" -> "Transfer"
-- "Payroll", "Deposit", "Credit" -> "Income" (if amount is negative/credit)
-- "Mortgage", "Rent" -> "Housing"
-- "Gas", "Fuel" -> "Transport"
-- "Restaurant", "Cafe", "Coffee", "Burger" -> "Dining"
-- "Spotify", "Netflix", "Hulu" -> "Entertainment"
-- "AWS", "Google Cloud", "Apple" -> "Tech" or "Shopping"
-- "Loan" -> "Financial"
+Input is a JSON object describing a cluster of transactions.
+Output must be a JSON object with keys "category" and "flow_type".
+
+CRITICAL LOGIC RULES:
+- "TRANSFER": 
+    - Credit Card Payments (e.g. "Payment to Visa", "Autopay", "Chase Card").
+    - Transfers between accounts (e.g. "Transfer to Savings", "Zelle to self").
+    - Investment deposits.
+    - These are NOT spending.
+- "INCOME":
+    - Payroll, Salary, Deposit, Interest, Refunds.
+- "EXPENSE":
+    - Real spending (Groceries, Rent, Utilities, Dining).
+    - If it buys a good or service, it is an EXPENSE.
+
+Examples:
+- "Payment to Chase Card" -> {{"category": "Transfer", "flow_type": "TRANSFER"}}
+- "Giant Eagle" -> {{"category": "Groceries", "flow_type": "EXPENSE"}}
+- "Payroll Deposit" -> {{"category": "Income", "flow_type": "INCOME"}}
 """
 
 def clean_name(name: str) -> str:
@@ -57,14 +65,14 @@ def clean_name(name: str) -> str:
     name = re.sub(r'[^\w\s]', ' ', name)
     return ' '.join(name.split()).upper()
 
-def query_llm(context_data: dict) -> Optional[str]:
+def query_llm(context_data: dict) -> tuple[str, str]:
     """Queries the local LLM to categorize a transaction pattern.
 
     Args:
         context_data (dict): The context for the transaction pattern.
 
     Returns:
-        str | None: The suggested category, or None if the LLM is unreachable.
+        tuple[str, str]: (category, flow_type). Returns ("General", "EXPENSE") on failure.
     """
     payload = {
         "messages": [
@@ -72,7 +80,7 @@ def query_llm(context_data: dict) -> Optional[str]:
             {"role": "user", "content": json.dumps(context_data)}
         ],
         "temperature": 0.1,
-        "max_tokens": 50,
+        "max_tokens": 100,
         "response_format": {"type": "json_object"}
     }
     
@@ -83,13 +91,16 @@ def query_llm(context_data: dict) -> Optional[str]:
         content = result['choices'][0]['message']['content']
         if content.startswith("```json"):
             content = content[7:-3]
-        return json.loads(content).get('category', 'General')
+        
+        data = json.loads(content)
+        return data.get('category', 'General'), data.get('flow_type', 'EXPENSE')
+        
     except requests.exceptions.ConnectionError:
         print(f"  -> Warning: LLM endpoint ({LLM_URL}) is unreachable. Skipping categorization.")
         return None
     except Exception as e:
         print(f"LLM Error: {e}")
-        return "General"
+        return "General", "EXPENSE"
 
 def get_cluster_stats(transactions: list) -> dict:
     """Calculates statistics for a cluster of transactions.
@@ -171,13 +182,19 @@ def run_categorization() -> None:
         print(f"Categorizing [{data['type']}]: {key} ({len(data['txs'])} txs)...")
         # print(f"  Context: {json.dumps(stats)}")
         
-        category = query_llm(context)
-        if category is None:
+        result = query_llm(context)
+        if result is None:
             continue
             
-        print(f"  -> {category}")
+        category, flow_type = result
+        print(f"  -> {category} ({flow_type})")
         
-        rule = CategoryRule(match_value=key, match_type=data['type'], category=category)
+        rule = CategoryRule(
+            match_value=key, 
+            match_type=data['type'], 
+            category=category,
+            flow_type=flow_type
+        )
         session.add(rule)
         new_rules += 1
         
