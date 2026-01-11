@@ -1,0 +1,96 @@
+classDiagram
+direction BT
+class accounts {
+   varchar name
+   varchar mask
+   varchar type
+   varchar subtype
+   float current_balance
+   float available_balance
+   varchar iso_currency_code
+   float limit
+   float apy
+   float interest_rate
+   date maturity_date
+   date last_updated
+   json raw_json
+   varchar account_id
+}
+class category_rules {
+   varchar match_value
+   varchar match_type
+   varchar flow_type
+   varchar category
+   integer id
+}
+class investment_holdings {
+   date date_captured
+   varchar account_id
+   varchar security_id
+   float quantity
+   float institution_price
+   float institution_value
+   float cost_basis
+   varchar currency
+   json raw_json
+   integer id
+}
+class investment_transactions {
+   varchar account_id
+   varchar security_id
+   date date
+   varchar name
+   float quantity
+   float amount
+   float price
+   float fees
+   varchar type
+   varchar subtype
+   varchar currency
+   json raw_json
+   varchar investment_transaction_id
+}
+class plaid_items {
+   varchar item_id
+   varchar institution_id
+   varchar institution_name
+   varchar next_cursor
+   varchar access_token
+}
+class securities {
+   varchar name
+   varchar ticker_symbol
+   varchar institution_security_id
+   varchar type
+   float close_price
+   date close_price_as_of
+   varchar currency
+   boolean is_cash_equivalent
+   json raw_json
+   varchar security_id
+}
+class sqlite_master {
+   text type
+   text name
+   text tbl_name
+   int rootpage
+   text sql
+}
+class transactions {
+   varchar account_id
+   date date
+   varchar name
+   float amount
+   varchar currency
+   varchar flow_type
+   json category
+   varchar category_id
+   boolean pending
+   varchar merchant_name
+   varchar payment_channel
+   json raw_json
+   varchar transaction_id
+}
+
+investment_holdings  -->  securities : security_id
+investment_transactions  -->  securities : security_id

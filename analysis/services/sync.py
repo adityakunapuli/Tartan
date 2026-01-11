@@ -2,7 +2,6 @@
 
 import os
 import datetime
-from typing import Any, Optional
 import plaid
 from plaid.api import plaid_api
 from plaid.model.transactions_sync_request import TransactionsSyncRequest
@@ -18,9 +17,9 @@ from plaid.model.institutions_get_by_id_request import InstitutionsGetByIdReques
 from plaid.model.country_code import CountryCode
 from dotenv import load_dotenv
 import json
-from sqlalchemy import delete, select
+from sqlmodel import select, delete, Session
 
-from analysis.db.models import (
+from analysis.db.sqlmodel_models import (
     Transaction,
     InvestmentHolding,
     Security,
@@ -28,8 +27,7 @@ from analysis.db.models import (
     Account,
     PlaidItem,
 )
-from analysis.db.session import SessionLocal, init_db
-from analysis.schemas import AccountSchema
+from analysis.db.session import engine, init_db
 from analysis.utils import make_json_serializable
 
 # Load .env from project root
@@ -61,20 +59,20 @@ def get_plaid_client() -> plaid_api.PlaidApi:
     return plaid_api.PlaidApi(api_client)
 
 
-def sync_transactions(session: Any, client: Any, access_token: str) -> None:
+def sync_transactions(session: Session, client: plaid_api.PlaidApi, access_token: str) -> None:
     """Fetches and saves transactions incrementally using /transactions/sync.
 
     Args:
-        session (Any): Database session.
-        client (Any): Plaid API client.
+        session (Session): Database session.
+        client (PlaidApi): Plaid API client.
         access_token (str): Plaid access token.
     """
     print("Syncing Transactions (Incremental)...")
 
     # 1. Get the latest cursor for this access token
-    plaid_item = session.execute(
+    plaid_item = session.exec(
         select(PlaidItem).where(PlaidItem.access_token == access_token)
-    ).scalar_one_or_none()
+    ).first()
 
     if not plaid_item:
         # Create item entry if it doesn't exist
@@ -82,6 +80,7 @@ def sync_transactions(session: Any, client: Any, access_token: str) -> None:
         plaid_item = PlaidItem(access_token=access_token)
         session.add(plaid_item)
         session.commit()
+        session.refresh(plaid_item)
 
     cursor = plaid_item.next_cursor
     added_count = 0
@@ -144,12 +143,13 @@ def sync_transactions(session: Any, client: Any, access_token: str) -> None:
                 stmt = delete(Transaction).where(
                     Transaction.transaction_id == t["transaction_id"]
                 )
-                session.execute(stmt)
+                session.exec(stmt)
                 removed_count += 1
 
             # Update Cursor
             cursor = response["next_cursor"]
             plaid_item.next_cursor = cursor
+            session.add(plaid_item) # Explicit add for SQLModel update
             session.commit()
 
             if not response["has_more"]:
@@ -165,12 +165,12 @@ def sync_transactions(session: Any, client: Any, access_token: str) -> None:
     )
 
 
-def sync_holdings(session: Any, client: Any, access_token: str) -> None:
+def sync_holdings(session: Session, client: plaid_api.PlaidApi, access_token: str) -> None:
     """Fetches and saves investment holdings.
 
     Args:
-        session (Any): Database session.
-        client (Any): Plaid API client.
+        session (Session): Database session.
+        client (PlaidApi): Plaid API client.
         access_token (str): Plaid access token.
     """
     print("Syncing Investment Holdings...")
@@ -206,11 +206,12 @@ def sync_holdings(session: Any, client: Any, access_token: str) -> None:
         account_ids = {h.account_id for h in response["holdings"]}
 
         if account_ids:
+            # SQLModel uses exec for statements too
             stmt = delete(InvestmentHolding).where(
                 (InvestmentHolding.date_captured == today)
                 & (InvestmentHolding.account_id.in_(account_ids))
             )
-            session.execute(stmt)
+            session.exec(stmt)
             # No commit yet, we do it after adding new ones
 
         count = 0
@@ -246,13 +247,13 @@ def sync_holdings(session: Any, client: Any, access_token: str) -> None:
 
 
 def sync_investment_transactions(
-    session: Any, client: Any, access_token: str, days: int = 730
+    session: Session, client: plaid_api.PlaidApi, access_token: str, days: int = 730
 ) -> None:
     """Fetches and saves investment transactions.
 
     Args:
-        session (Any): Database session.
-        client (Any): Plaid API client.
+        session (Session): Database session.
+        client (PlaidApi): Plaid API client.
         access_token (str): Plaid access token.
         days (int, optional): Number of days of history to fetch. Defaults to 730.
     """
@@ -351,16 +352,16 @@ def sync_investment_transactions(
     print(f"  -> Total Investment Transactions Synced: {total_retrieved}")
 
 
-def sync_accounts(session: Any, client: Any, access_token: str) -> Optional[str]:
+def sync_accounts(session: Session, client: plaid_api.PlaidApi, access_token: str) -> str | None:
     """Fetches and saves account balances and metadata.
 
     Args:
-        session (Any): Database session.
-        client (Any): Plaid API client.
+        session (Session): Database session.
+        client (PlaidApi): Plaid API client.
         access_token (str): Plaid access token.
 
     Returns:
-        Optional[str]: The institution_id if successful, None otherwise.
+        str | None: The institution_id if successful, None otherwise.
     """
     print("Syncing Accounts (Balances)...")
     try:
@@ -378,8 +379,9 @@ def sync_accounts(session: Any, client: Any, access_token: str) -> Optional[str]
             # Balances object
             balances = a.balances
 
-            # Create Pydantic Model (Validation Layer)
-            account_data = AccountSchema(
+            # SQLModel (Account) can be instantiated directly with validated data
+            # since it inherits from Pydantic BaseModel.
+            acc_obj = Account(
                 account_id=a.account_id,
                 name=a.name,
                 mask=a.mask,
@@ -392,15 +394,11 @@ def sync_accounts(session: Any, client: Any, access_token: str) -> Optional[str]
                 apy=getattr(a, "apy", None),
                 interest_rate=getattr(a, "interest_rate", None),
                 maturity_date=getattr(a, "maturity_date", None),
-                # Pydantic model has raw_json as Optional[dict]
+                last_updated=datetime.date.today(),
                 raw_json=a_dict_serializable,
             )
-
-            # Create SQLAlchemy Model (Persistence Layer)
-            # We use model_dump to convert Pydantic model to dict
-            acc_obj = Account(
-                **account_data.model_dump(), last_updated=datetime.date.today()
-            )
+            
+            # Use merge to upsert
             session.merge(acc_obj)
             count += 1
 
@@ -418,67 +416,70 @@ def run_sync() -> None:
     """Orchestrates the synchronization process for all configured access tokens."""
     init_db()
     client = get_plaid_client()
-    session = SessionLocal()
+    
+    # Use Session context manager manually since get_db yields it
+    with Session(engine) as session:
+        try:
+            # Support multiple tokens comma-separated
+            access_tokens_str = os.getenv("PLAID_ACCESS_TOKEN", "")
+            access_tokens = [t.strip() for t in access_tokens_str.split(",") if t.strip()]
 
-    try:
-        # Support multiple tokens comma-separated
-        access_tokens_str = os.getenv("PLAID_ACCESS_TOKEN", "")
-        access_tokens = [t.strip() for t in access_tokens_str.split(",") if t.strip()]
+            if not access_tokens:
+                print("No PLAID_ACCESS_TOKEN found in .env")
+                return
 
-        if not access_tokens:
-            print("No PLAID_ACCESS_TOKEN found in .env")
-            return
+            print(f"Found {len(access_tokens)} access token(s).")
 
-        print(f"Found {len(access_tokens)} access token(s).")
+            token_map = {}
 
-        token_map = {}
+            for i, token in enumerate(access_tokens):
+                inst_id = sync_accounts(session, client, token)
+                inst_name = "Unknown Institution"
 
-        for i, token in enumerate(access_tokens):
-            inst_id = sync_accounts(session, client, token)
-            inst_name = "Unknown Institution"
+                if inst_id:
+                    try:
+                        # Update PlaidItem with institution_id
+                        plaid_item = session.exec(
+                            select(PlaidItem).where(PlaidItem.access_token == token)
+                        ).first()
 
-            if inst_id:
-                try:
-                    # Update PlaidItem with institution_id
-                    plaid_item = session.execute(
-                        select(PlaidItem).where(PlaidItem.access_token == token)
-                    ).scalar_one_or_none()
+                        if not plaid_item:
+                            plaid_item = PlaidItem(access_token=token)
+                            session.add(plaid_item)
 
-                    if not plaid_item:
-                        plaid_item = PlaidItem(access_token=token)
+                        plaid_item.institution_id = inst_id
+
+                        # Resolve Name
+                        request = InstitutionsGetByIdRequest(
+                            institution_id=inst_id, country_codes=[CountryCode("US")]
+                        )
+                        inst_response = client.institutions_get_by_id(request)
+                        inst_name = inst_response["institution"]["name"]
+                        plaid_item.institution_name = inst_name
                         session.add(plaid_item)
+                        session.commit()
 
-                    plaid_item.institution_id = inst_id
+                    except Exception as e:
+                        print(f"  -> Could not resolve institution name: {e}")
+                        inst_name = f"Institution {inst_id}"
 
-                    # Resolve Name
-                    request = InstitutionsGetByIdRequest(
-                        institution_id=inst_id, country_codes=[CountryCode("US")]
-                    )
-                    inst_response = client.institutions_get_by_id(request)
-                    inst_name = inst_response["institution"]["name"]
-                    plaid_item.institution_name = inst_name
-                    session.commit()
+                token_map[token] = inst_name
+                print(f"\n--- Syncing {inst_name} ({i + 1}/{len(access_tokens)}) ---")
 
-                except Exception as e:
-                    print(f"  -> Could not resolve institution name: {e}")
-                    inst_name = f"Institution {inst_id}"
+                sync_transactions(session, client, token)
+                sync_holdings(session, client, token)
+                sync_investment_transactions(session, client, token)
 
-            token_map[token] = inst_name
-            print(f"\n--- Syncing {inst_name} ({i + 1}/{len(access_tokens)}) ---")
+            print("\n" + "=" * 60)
+            print(f"{ 'INSTITUTION':<30} | {'ACCESS TOKEN'}")
+            print("-" * 60)
+            for token, name in token_map.items():
+                print(f"{name:<30} | {token}")
+            print("=" * 60)
 
-            sync_transactions(session, client, token)
-            sync_holdings(session, client, token)
-            sync_investment_transactions(session, client, token)
-
-        print("\n" + "=" * 60)
-        print(f"{'INSTITUTION':<30} | {'ACCESS TOKEN'}")
-        print("-" * 60)
-        for token, name in token_map.items():
-            print(f"{name:<30} | {token}")
-        print("=" * 60)
-
-    finally:
-        session.close()
+        finally:
+            # Context manager handles close, but explicit check doesn't hurt
+            pass
 
 
 if __name__ == "__main__":

@@ -1,0 +1,97 @@
+erDiagram
+    "transactions" {
+        String transaction_id PK
+        String account_id FK
+        Date date
+        String name
+        Float amount
+        String currency
+        String flow_type
+        JSON category
+        String category_id
+        Boolean pending
+        String merchant_name
+        String payment_channel
+        JSON raw_json
+    }
+
+    "investment_transactions" {
+        String investment_transaction_id PK
+        String account_id FK
+        String security_id FK
+        Date date
+        String name
+        Float quantity
+        Float amount
+        Float price
+        Float fees
+        String type
+        String subtype
+        String currency
+        JSON raw_json
+    }
+
+    "investment_holdings" {
+        Integer id PK
+        Date date_captured
+        String account_id FK
+        String security_id FK
+        Float quantity
+        Float institution_price
+        Float institution_value
+        Float cost_basis
+        String currency
+        JSON raw_json
+    }
+
+    "securities" {
+        String security_id PK
+        String name
+        String ticker_symbol
+        String institution_security_id
+        String type
+        Float close_price
+        Date close_price_as_of
+        String currency
+        Boolean is_cash_equivalent
+        JSON raw_json
+    }
+
+    "accounts" {
+        String account_id PK
+        String name
+        String mask
+        String type
+        String subtype
+        Float current_balance
+        Float available_balance
+        String iso_currency_code
+        Float limit
+        Float apy
+        Float interest_rate
+        Date maturity_date
+        Date last_updated
+        JSON raw_json
+    }
+
+    "category_rules" {
+        Integer id PK
+        String match_value
+        String match_type
+        String flow_type
+        String category
+    }
+
+    "plaid_items" {
+        String access_token PK
+        String item_id
+        String institution_id
+        String institution_name
+        String next_cursor
+    }
+
+    "accounts" ||--o{ "transactions" : "has"
+    "accounts" ||--o{ "investment_transactions" : "has"
+    "accounts" ||--o{ "investment_holdings" : "has"
+    "securities" ||--o{ "investment_transactions" : "related to"
+    "securities" ||--o{ "investment_holdings" : "related to"

@@ -1,12 +1,11 @@
 """Data access layer for retrieving financial data as DataFrames."""
 
-from typing import Optional
 import pandas as pd
 from analysis.db.session import engine
 from analysis.utils import clean_name
 
 
-def get_denormalized_holdings(date_captured: Optional[str] = None) -> pd.DataFrame:
+def get_denormalized_holdings(date_captured: str | None = None) -> pd.DataFrame:
     """Returns a DataFrame of investment holdings joined with security details.
 
     Args:

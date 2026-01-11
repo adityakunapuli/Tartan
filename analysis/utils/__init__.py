@@ -2,7 +2,6 @@
 
 import re
 import datetime
-from typing import Any
 
 
 def clean_name(name: str) -> str:
@@ -32,14 +31,14 @@ def clean_name(name: str) -> str:
     return " ".join(name.split()).upper()
 
 
-def make_json_serializable(data: Any) -> Any:
+def make_json_serializable(data):
     """Recursively converts datetime objects to ISO format strings.
 
     Args:
-        data (Any): The data to serialize (dict, list, or scalar).
+        data: The data to serialize (dict, list, or scalar).
 
     Returns:
-        Any: The JSON-serializable data.
+        The JSON-serializable data.
     """
     if isinstance(data, dict):
         return {k: make_json_serializable(v) for k, v in data.items()}
