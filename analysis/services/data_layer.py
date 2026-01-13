@@ -88,36 +88,35 @@ def get_enriched_transactions_df() -> pd.DataFrame:
     )
 
     def apply_rule(row: pd.Series) -> pd.Series:
-        default = pd.Series(
-            {"enriched_category": "Uncategorized", "flow_type": "EXPENSE"}
-        )
-
+        default = pd.Series({'enriched_category': 'Uncategorized', 'flow_type': 'EXPENSE'})
+        
         # 1. Try Merchant Match
-        if row["merchant_name"] and row["merchant_name"] in merchant_map:
-            match = merchant_map[row["merchant_name"]]
-            return pd.Series(
-                {
-                    "enriched_category": match["category"],
-                    "flow_type": match["flow_type"],
-                }
-            )
-
+        if row['merchant_name'] and row['merchant_name'] in merchant_map:
+            match = merchant_map[row['merchant_name']]
+            return pd.Series({'enriched_category': match['category'], 'flow_type': match['flow_type']})
+            
         # 2. Try Pattern Match
-        c_name = clean_name(row["name"])
+        c_name = clean_name(row['name'])
         if c_name in pattern_map:
             match = pattern_map[c_name]
-            return pd.Series(
-                {
-                    "enriched_category": match["category"],
-                    "flow_type": match["flow_type"],
-                }
-            )
-
+            return pd.Series({'enriched_category': match['category'], 'flow_type': match['flow_type']})
+            
         return default
 
     df[["enriched_category", "flow_type"]] = df.apply(apply_rule, axis=1)
+    
+    # 4. Vectorized Heuristic Fallback (Safety Net)
+    # Catch transfers that might have been missed
+    mask = df['name'].str.upper().str.contains('TRANSFER|GOLDMAN SACHS|ONLINE BANKING|PAYMENT TO|CREDIT CRD', regex=True, na=False)
+    uncat_mask = df['enriched_category'] == 'Uncategorized'
+    
+    final_mask = mask & uncat_mask
+    
+    if final_mask.any():
+        df.loc[final_mask, 'enriched_category'] = 'Transfer'
+        df.loc[final_mask, 'flow_type'] = 'TRANSFER'
+        
     return df
-
 
 def get_investment_transactions_df() -> pd.DataFrame:
     """Returns all investment transactions joined with securities.

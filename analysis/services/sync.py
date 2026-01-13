@@ -76,7 +76,6 @@ def sync_transactions(session: Session, client: plaid_api.PlaidApi, access_token
 
     if not plaid_item:
         # Create item entry if it doesn't exist
-        # We'll populate item_id on the first sync response
         plaid_item = PlaidItem(access_token=access_token)
         session.add(plaid_item)
         session.commit()
@@ -149,7 +148,7 @@ def sync_transactions(session: Session, client: plaid_api.PlaidApi, access_token
             # Update Cursor
             cursor = response["next_cursor"]
             plaid_item.next_cursor = cursor
-            session.add(plaid_item)  # Explicit add for SQLModel update
+            session.add(plaid_item)
             session.commit()
 
             if not response["has_more"]:
@@ -181,7 +180,7 @@ def sync_holdings(session: Session, client: plaid_api.PlaidApi, access_token: st
 
         today = datetime.date.today()
 
-        # Sync Securities first
+        # 1. Sync Securities first
         for s in response["securities"]:
             s_dict = s.to_dict()
             s_dict_serializable = make_json_serializable(s_dict)
@@ -200,20 +199,16 @@ def sync_holdings(session: Session, client: plaid_api.PlaidApi, access_token: st
             )
             session.merge(sec_obj)
 
-        # Sync Holdings
-        # Prevent Zombie Data: Delete existing holdings for today for the accounts involved
-        # Since one access token can have multiple accounts, we collect them first
+        # 2. Prevent Duplicates: Delete existing holdings for today for the accounts involved
         account_ids = {h.account_id for h in response["holdings"]}
-
         if account_ids:
-            # SQLModel uses exec for statements too
             stmt = delete(InvestmentHolding).where(
                 (InvestmentHolding.date_captured == today)
                 & (InvestmentHolding.account_id.in_(account_ids))
             )
             session.exec(stmt)
-            # No commit yet, we do it after adding new ones
 
+        # 3. Sync Holdings
         count = 0
         for h in response["holdings"]:
             h_dict = h.to_dict()
@@ -235,12 +230,11 @@ def sync_holdings(session: Session, client: plaid_api.PlaidApi, access_token: st
 
         session.commit()
         print(f"  -> Saved {count} holdings.")
+
     except plaid.ApiException as e:
         error_response = json.loads(e.body)
         if error_response.get("error_code") == "PRODUCTS_NOT_SUPPORTED":
-            print(
-                "  -> Skipping: Investments product not supported by this institution."
-            )
+            print("  -> Skipping: Investments product not supported by this institution.")
         else:
             print(f"  -> Error: {e}")
         session.rollback()
@@ -318,10 +312,10 @@ def sync_investment_transactions(
                     amount=t.amount,
                     price=t.price,
                     fees=t.fees,
-                    type=str(t.type),  # Convert enum to string
+                    type=str(t.type),
                     subtype=str(t.subtype)
                     if t.subtype
-                    else None,  # Convert enum to string
+                    else None,
                     currency=t.iso_currency_code,
                     raw_json=t_dict_serializable,
                 )
