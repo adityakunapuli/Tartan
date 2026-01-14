@@ -106,15 +106,23 @@ def get_enriched_transactions_df() -> pd.DataFrame:
     df[["enriched_category", "flow_type"]] = df.apply(apply_rule, axis=1)
     
     # 4. Vectorized Heuristic Fallback (Safety Net)
-    # Catch transfers that might have been missed
-    mask = df['name'].str.upper().str.contains('TRANSFER|GOLDMAN SACHS|ONLINE BANKING|PAYMENT TO|CREDIT CRD', regex=True, na=False)
+    # Catch transfers and income that might have been missed
+    mask = df['name'].str.upper().str.contains('TRANSFER|GOLDMAN SACHS|ONLINE BANKING|PAYMENT TO|CREDIT CRD|VACP TREAS|VA BENEF|GUSTO|PAYROLL|MR. COOPER', regex=True, na=False)
     uncat_mask = df['enriched_category'] == 'Uncategorized'
     
     final_mask = mask & uncat_mask
     
     if final_mask.any():
-        df.loc[final_mask, 'enriched_category'] = 'Transfer'
-        df.loc[final_mask, 'flow_type'] = 'TRANSFER'
+        # Determine if it's Income or Transfer based on common keywords
+        # This is a bit crude but safer than 'EXPENSE'
+        income_mask = df['name'].str.upper().str.contains('VACP TREAS|VA BENEF|GUSTO|PAYROLL', regex=True, na=False)
+        
+        df.loc[final_mask & income_mask, 'enriched_category'] = 'Income'
+        df.loc[final_mask & income_mask, 'flow_type'] = 'INCOME'
+        
+        # Everything else in the final_mask is a Transfer
+        df.loc[final_mask & ~income_mask, 'enriched_category'] = 'Transfer'
+        df.loc[final_mask & ~income_mask, 'flow_type'] = 'TRANSFER'
         
     return df
 
