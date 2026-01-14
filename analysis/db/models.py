@@ -124,6 +124,31 @@ class CategoryRule(SQLModel, table=True):
     category: str
 
 
+class Liability(SQLModel, table=True):
+    """SQLModel for detailed liability data (Credit Cards, Loans)."""
+
+    __tablename__ = "liabilities"
+
+    account_id: str = Field(primary_key=True)
+    type: str  # 'credit' or 'student' or 'mortgage'
+    
+    # Credit Card Specific
+    aprs: list[dict] | None = Field(default=None, sa_column=Column(JSON))
+    is_overdue: bool | None = None
+    last_payment_amount: float | None = None
+    last_payment_date: date | None = None
+    next_payment_due_date: date | None = None
+    minimum_payment_amount: float | None = None
+    
+    # Loan Specific
+    origination_date: date | None = None
+    principal_amount: float | None = None
+    interest_rate_percentage: float | None = None
+    expected_payoff_date: date | None = None
+    
+    raw_json: dict | list | None = Field(default=None, sa_column=Column(JSON))
+
+
 class PlaidItem(SQLModel, table=True):
     """SQLModel for Plaid Items (connections)."""
 

@@ -14,6 +14,7 @@ from plaid.model.investments_transactions_get_request_options import (
     InvestmentsTransactionsGetRequestOptions,
 )
 from plaid.model.accounts_get_request import AccountsGetRequest
+from plaid.model.liabilities_get_request import LiabilitiesGetRequest
 from plaid.model.institutions_get_by_id_request import InstitutionsGetByIdRequest
 from plaid.model.country_code import CountryCode
 from dotenv import load_dotenv
@@ -26,6 +27,7 @@ from analysis.db.models import (
     InvestmentTransaction,
     Account,
     PlaidItem,
+    Liability,
 )
 from analysis.db.session import engine, init_db
 from analysis.utils import make_json_serializable
@@ -346,6 +348,86 @@ def sync_investment_transactions(
     print(f"  -> Total Investment Transactions Synced: {total_retrieved}")
 
 
+def sync_liabilities(session: Session, client: plaid_api.PlaidApi, access_token: str) -> None:
+    """Fetches and saves detailed liability information (Credit Cards, Loans).
+
+    Args:
+        session (Session): Database session.
+        client (PlaidApi): Plaid API client.
+        access_token (str): Plaid access token.
+    """
+    print("Syncing Liabilities (APR/Loan terms)...")
+    try:
+        request = LiabilitiesGetRequest(access_token=access_token)
+        response = client.liabilities_get(request)
+        liabilities = response["liabilities"]
+
+        count = 0
+        # Process Credit Cards
+        for c in liabilities.get("credit", []):
+            lib_obj = Liability(
+                account_id=c["account_id"],
+                type="credit",
+                aprs=make_json_serializable(c.get("aprs")),
+                is_overdue=c.get("is_overdue"),
+                last_payment_amount=c.get("last_payment_amount"),
+                last_payment_date=c.get("last_payment_date"),
+                next_payment_due_date=c.get("next_payment_due_date"),
+                minimum_payment_amount=c.get("minimum_payment_amount"),
+                raw_json=make_json_serializable(c)
+            )
+            session.merge(lib_obj)
+            count += 1
+
+        # Process Mortgages
+        for m in liabilities.get("mortgage", []):
+            lib_obj = Liability(
+                account_id=m["account_id"],
+                type="mortgage",
+                interest_rate_percentage=m.get("interest_rate", {}).get("percentage"),
+                origination_date=m.get("origination_date"),
+                principal_amount=m.get("origination_principal_amount"),
+                raw_json=make_json_serializable(m)
+            )
+            session.merge(lib_obj)
+            count += 1
+
+        # Process Student Loans
+        for s in liabilities.get("student", []):
+            lib_obj = Liability(
+                account_id=s["account_id"],
+                type="student",
+                interest_rate_percentage=s.get("interest_rate_percentage"),
+                origination_date=s.get("origination_date"),
+                principal_amount=s.get("origination_principal_amount"),
+                expected_payoff_date=s.get("expected_payoff_date"),
+                last_payment_amount=s.get("last_payment_amount"),
+                last_payment_date=s.get("last_payment_date"),
+                next_payment_due_date=s.get("next_payment_due_date"),
+                minimum_payment_amount=s.get("minimum_payment_amount"),
+                raw_json=make_json_serializable(s)
+            )
+            session.merge(lib_obj)
+            count += 1
+
+        session.commit()
+        print(f"  -> Saved {count} liability records.")
+
+    except plaid.ApiException as e:
+        error_response = json.loads(e.body)
+        error_code = error_response.get("error_code")
+        
+        if error_code == "ADDITIONAL_CONSENT_REQUIRED":
+            print("  -> ⚠️ Action Required: Re-link this institution to enable Liabilities data.")
+        elif error_code == "PRODUCTS_NOT_SUPPORTED":
+            print("  -> Skipping: Liabilities product not supported by this institution.")
+        elif error_code == "NO_LIABILITY_ACCOUNTS":
+            print("  -> ℹ️ Info: No liability accounts (credit cards/loans) found for this item.")
+        else:
+            print(f"  -> Error: {e}")
+        session.rollback()
+
+
 def sync_accounts(session: Session, client: plaid_api.PlaidApi, access_token: str) -> str | None:
     """Fetches and saves account balances and metadata.
 
@@ -463,6 +545,7 @@ def run_sync() -> None:
                 sync_transactions(session, client, token)
                 sync_holdings(session, client, token)
                 sync_investment_transactions(session, client, token)
+                sync_liabilities(session, client, token)
 
             print("\n" + "=" * 60)
             print(f"{ 'INSTITUTION':<30} | {'ACCESS TOKEN'}")
