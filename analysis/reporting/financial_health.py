@@ -3,10 +3,8 @@
 import pandas as pd
 from analysis.services.data_layer import get_enriched_transactions_df
 from analysis.db.session import engine
-from analysis.manual_data import VESTING_SCHEDULE
+from analysis.manual_data import VESTING_SCHEDULE, MONTHLY_SPOUSE_INCOME
 from datetime import date
-
-print("Starting Financial Health Report...")
 
 def get_current_liquidity() -> float:
     """Calculates total liquid cash from depository accounts.
@@ -76,12 +74,17 @@ def analyze_financial_health() -> None:
     total_spend = expenses['amount'].sum()
     monthly_burn = total_spend / 6.0
     
-    print(f"\n[METRIC] True Burn Rate (6-mo Avg): ${monthly_burn:,.2f} / month")
+    print(f"\n[METRIC] Gross Burn Rate (6-mo Avg): ${monthly_burn:,.2f} / month")
     print(f"  -> Total Spend (6-mo): ${total_spend:,.2f}")
     
-    # 2. Target Emergency Fund
-    target_cash = monthly_burn * 6.0
-    print(f"[METRIC] Target Emergency Fund (6 Months): ${target_cash:,.2f}")
+    # 2. Target Emergency Fund (Adjusted for Guaranteed Income)
+    monthly_net_burn = max(0, monthly_burn - MONTHLY_SPOUSE_INCOME)
+    
+    print(f"[METRIC] Guaranteed Monthly Income: ${MONTHLY_SPOUSE_INCOME:,.2f}")
+    print(f"[METRIC] Net Burn Rate (Risk Exposure): ${monthly_net_burn:,.2f} / month")
+    
+    target_cash = monthly_net_burn * 6.0
+    print(f"[METRIC] Target Emergency Fund (6 Months Net): ${target_cash:,.2f}")
     
     # 3. Current State
     current_cash = get_current_liquidity()
