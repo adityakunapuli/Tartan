@@ -17,7 +17,7 @@ from plaid.model.accounts_get_request import AccountsGetRequest
 from plaid.model.liabilities_get_request import LiabilitiesGetRequest
 from plaid.model.institutions_get_by_id_request import InstitutionsGetByIdRequest
 from plaid.model.country_code import CountryCode
-from dotenv import load_dotenv
+from dotenv import load_dotenv, find_dotenv
 from sqlmodel import select, delete, Session
 
 from analysis.db.models import (
@@ -33,8 +33,44 @@ from analysis.db.session import engine, init_db
 from analysis.utils import make_json_serializable
 
 # Load .env from project root
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-load_dotenv(os.path.join(BASE_DIR, ".env"), override=True)
+load_dotenv(find_dotenv(), override=True)
+
+
+def _parse_csv_env(name: str) -> set[str]:
+    value = os.getenv(name, "")
+    return {v.strip() for v in value.split(",") if v.strip()}
+
+
+def _resolve_excluded_account_ids(session: Session) -> set[str]:
+    excluded_ids = _parse_csv_env("EXCLUDED_ACCOUNT_IDS")
+    excluded_names = {n.lower() for n in _parse_csv_env("EXCLUDED_ACCOUNT_NAMES")}
+    if not excluded_names:
+        return excluded_ids
+
+    accounts = session.exec(select(Account)).all()
+    for a in accounts:
+        if a.name and a.name.lower() in excluded_names:
+            excluded_ids.add(a.account_id)
+    return excluded_ids
+
+
+def _should_skip_transaction(
+        session: Session, transaction_id: str, account_id: str
+) -> bool:
+    existing = session.exec(
+        select(Transaction).where(Transaction.transaction_id == transaction_id)
+    ).first()
+    if not existing:
+        return False
+
+    if existing.account_id != account_id:
+        print(
+            "  -> Skipping transaction due to ID collision across accounts: "
+            f"{transaction_id} (existing={existing.account_id}, incoming={account_id})"
+        )
+        return True
+
+    return False
 
 
 def get_plaid_client() -> plaid_api.PlaidApi:
@@ -61,7 +97,13 @@ def get_plaid_client() -> plaid_api.PlaidApi:
     return plaid_api.PlaidApi(api_client)
 
 
-def sync_transactions(session: Session, client: plaid_api.PlaidApi, access_token: str) -> None:
+def sync_transactions(
+        session: Session,
+        client: plaid_api.PlaidApi,
+        access_token: str,
+        excluded_account_ids: set[str] | None = None,
+        seen_tx_keys: set[str] | None = None,
+) -> None:
     """Fetches and saves transactions incrementally using /transactions/sync.
 
     Args:
@@ -88,6 +130,7 @@ def sync_transactions(session: Session, client: plaid_api.PlaidApi, access_token
     modified_count = 0
     removed_count = 0
 
+    seen = seen_tx_keys if seen_tx_keys is not None else set()
     while True:
         try:
             request_kwargs = {"access_token": access_token, "count": 500}
@@ -99,6 +142,14 @@ def sync_transactions(session: Session, client: plaid_api.PlaidApi, access_token
 
             # Process ADDED
             for t in response["added"]:
+                if excluded_account_ids and t.account_id in excluded_account_ids:
+                    continue
+                if _should_skip_transaction(session, t.transaction_id, t.account_id):
+                    continue
+                tx_key = f"{t.transaction_id}:{t.account_id}"
+                if tx_key in seen:
+                    continue
+                seen.add(tx_key)
                 t_dict = t.to_dict()
                 t_dict_serializable = make_json_serializable(t_dict)
                 tx_obj = Transaction(
@@ -120,6 +171,14 @@ def sync_transactions(session: Session, client: plaid_api.PlaidApi, access_token
 
             # Process MODIFIED
             for t in response["modified"]:
+                if excluded_account_ids and t.account_id in excluded_account_ids:
+                    continue
+                if _should_skip_transaction(session, t.transaction_id, t.account_id):
+                    continue
+                tx_key = f"{t.transaction_id}:{t.account_id}"
+                if tx_key in seen:
+                    continue
+                seen.add(tx_key)
                 t_dict = t.to_dict()
                 t_dict_serializable = make_json_serializable(t_dict)
                 tx_obj = Transaction(
@@ -141,6 +200,14 @@ def sync_transactions(session: Session, client: plaid_api.PlaidApi, access_token
 
             # Process REMOVED
             for t in response["removed"]:
+                if excluded_account_ids and t["transaction_id"]:
+                    existing = session.exec(
+                        select(Transaction).where(
+                            Transaction.transaction_id == t["transaction_id"]
+                        )
+                    ).first()
+                    if existing and existing.account_id in excluded_account_ids:
+                        continue
                 stmt = delete(Transaction).where(
                     Transaction.transaction_id == t["transaction_id"]
                 )
@@ -166,7 +233,12 @@ def sync_transactions(session: Session, client: plaid_api.PlaidApi, access_token
     )
 
 
-def sync_holdings(session: Session, client: plaid_api.PlaidApi, access_token: str) -> None:
+def sync_holdings(
+        session: Session,
+        client: plaid_api.PlaidApi,
+        access_token: str,
+        excluded_account_ids: set[str] | None = None,
+) -> None:
     """Fetches and saves investment holdings.
 
     Args:
@@ -203,6 +275,8 @@ def sync_holdings(session: Session, client: plaid_api.PlaidApi, access_token: st
 
         # 2. Prevent Duplicates: Delete existing holdings for today for the accounts involved
         account_ids = {h.account_id for h in response["holdings"]}
+        if excluded_account_ids:
+            account_ids = {aid for aid in account_ids if aid not in excluded_account_ids}
         if account_ids:
             stmt = delete(InvestmentHolding).where(
                 (InvestmentHolding.date_captured == today)
@@ -213,6 +287,8 @@ def sync_holdings(session: Session, client: plaid_api.PlaidApi, access_token: st
         # 3. Sync Holdings
         count = 0
         for h in response["holdings"]:
+            if excluded_account_ids and h.account_id in excluded_account_ids:
+                continue
             h_dict = h.to_dict()
             h_dict_serializable = make_json_serializable(h_dict)
 
@@ -243,7 +319,11 @@ def sync_holdings(session: Session, client: plaid_api.PlaidApi, access_token: st
 
 
 def sync_investment_transactions(
-    session: Session, client: plaid_api.PlaidApi, access_token: str, days: int = 730
+        session: Session,
+        client: plaid_api.PlaidApi,
+        access_token: str,
+        days: int = 730,
+        excluded_account_ids: set[str] | None = None,
 ) -> None:
     """Fetches and saves investment transactions.
 
@@ -301,6 +381,8 @@ def sync_investment_transactions(
             # Sync Transactions
             count = 0
             for t in inv_transactions:
+                if excluded_account_ids and t.account_id in excluded_account_ids:
+                    continue
                 t_dict = t.to_dict()
                 t_dict_serializable = make_json_serializable(t_dict)
 
@@ -348,7 +430,12 @@ def sync_investment_transactions(
     print(f"  -> Total Investment Transactions Synced: {total_retrieved}")
 
 
-def sync_liabilities(session: Session, client: plaid_api.PlaidApi, access_token: str) -> None:
+def sync_liabilities(
+        session: Session,
+        client: plaid_api.PlaidApi,
+        access_token: str,
+        excluded_account_ids: set[str] | None = None,
+) -> None:
     """Fetches and saves detailed liability information (Credit Cards, Loans).
 
     Args:
@@ -365,6 +452,8 @@ def sync_liabilities(session: Session, client: plaid_api.PlaidApi, access_token:
         count = 0
         # Process Credit Cards
         for c in liabilities.get("credit", []):
+            if excluded_account_ids and c["account_id"] in excluded_account_ids:
+                continue
             lib_obj = Liability(
                 account_id=c["account_id"],
                 type="credit",
@@ -381,6 +470,8 @@ def sync_liabilities(session: Session, client: plaid_api.PlaidApi, access_token:
 
         # Process Mortgages
         for m in liabilities.get("mortgage", []):
+            if excluded_account_ids and m["account_id"] in excluded_account_ids:
+                continue
             lib_obj = Liability(
                 account_id=m["account_id"],
                 type="mortgage",
@@ -394,6 +485,8 @@ def sync_liabilities(session: Session, client: plaid_api.PlaidApi, access_token:
 
         # Process Student Loans
         for s in liabilities.get("student", []):
+            if excluded_account_ids and s["account_id"] in excluded_account_ids:
+                continue
             lib_obj = Liability(
                 account_id=s["account_id"],
                 type="student",
@@ -416,13 +509,13 @@ def sync_liabilities(session: Session, client: plaid_api.PlaidApi, access_token:
     except plaid.ApiException as e:
         error_response = json.loads(e.body)
         error_code = error_response.get("error_code")
-        
+
         if error_code == "ADDITIONAL_CONSENT_REQUIRED":
-            print("  -> ⚠️ Action Required: Re-link this institution to enable Liabilities data.")
+            print("  -> [WARN] Action Required: Re-link this institution to enable Liabilities data.")
         elif error_code == "PRODUCTS_NOT_SUPPORTED":
             print("  -> Skipping: Liabilities product not supported by this institution.")
         elif error_code == "NO_LIABILITY_ACCOUNTS":
-            print("  -> ℹ️ Info: No liability accounts (credit cards/loans) found for this item.")
+            print("  -> [INFO] No liability accounts (credit cards/loans) found for this item.")
         else:
             print(f"  -> Error: {e}")
         session.rollback()
@@ -492,7 +585,7 @@ def run_sync() -> None:
     """Orchestrates the synchronization process for all configured access tokens."""
     init_db()
     client = get_plaid_client()
-    
+
     # Use Session context manager manually since get_db yields it
     with Session(engine) as session:
         try:
@@ -507,6 +600,7 @@ def run_sync() -> None:
             print(f"Found {len(access_tokens)} access token(s).")
 
             token_map = {}
+            seen_tx_keys: set[str] = set()
 
             for i, token in enumerate(access_tokens):
                 inst_id = sync_accounts(session, client, token)
@@ -542,13 +636,25 @@ def run_sync() -> None:
                 token_map[token] = inst_name
                 print(f"\n--- Syncing {inst_name} ({i + 1}/{len(access_tokens)}) ---")
 
-                sync_transactions(session, client, token)
-                sync_holdings(session, client, token)
-                sync_investment_transactions(session, client, token)
-                sync_liabilities(session, client, token)
+                excluded_account_ids = _resolve_excluded_account_ids(session)
+                if excluded_account_ids:
+                    print(
+                        f"Excluding {len(excluded_account_ids)} account(s) from sync for this run."
+                    )
+
+                sync_transactions(
+                    session,
+                    client,
+                    token,
+                    excluded_account_ids,
+                    seen_tx_keys,
+                )
+                sync_holdings(session, client, token, excluded_account_ids)
+                sync_investment_transactions(session, client, token, 730, excluded_account_ids)
+                sync_liabilities(session, client, token, excluded_account_ids)
 
             print("\n" + "=" * 60)
-            print(f"{ 'INSTITUTION':<30} | {'ACCESS TOKEN'}")
+            print(f"{'INSTITUTION':<30} | {'ACCESS TOKEN'}")
             print("-" * 60)
             for token, name in token_map.items():
                 print(f"{name:<30} | {token}")

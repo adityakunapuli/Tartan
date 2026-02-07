@@ -1,8 +1,42 @@
 """Data access layer for retrieving financial data as DataFrames."""
 
+import os
 import pandas as pd
+from dotenv import load_dotenv
 from analysis.db.session import engine
 from analysis.utils import clean_name
+
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+load_dotenv(os.path.join(BASE_DIR, ".env"), override=True)
+
+
+def _parse_csv_env(name: str) -> set[str]:
+    value = os.getenv(name, "")
+    return {v.strip() for v in value.split(",") if v.strip()}
+
+
+def _apply_account_exclusions(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty or "account_id" not in df.columns:
+        return df
+
+    excluded_ids = _parse_csv_env("EXCLUDED_ACCOUNT_IDS")
+    excluded_names = {n.lower() for n in _parse_csv_env("EXCLUDED_ACCOUNT_NAMES")}
+
+    if excluded_names:
+        accounts = pd.read_sql("SELECT account_id, name FROM accounts", engine)
+        if not accounts.empty:
+            name_map = {
+                row["account_id"]: str(row["name"]).lower()
+                for _, row in accounts.iterrows()
+            }
+            excluded_ids |= {
+                acc_id for acc_id, name in name_map.items() if name in excluded_names
+            }
+
+    if excluded_ids:
+        return df[~df["account_id"].isin(excluded_ids)].copy()
+
+    return df
 
 
 def get_denormalized_holdings(date_captured: str | None = None) -> pd.DataFrame:
@@ -37,7 +71,8 @@ def get_denormalized_holdings(date_captured: str | None = None) -> pd.DataFrame:
         # Default to latest date
         query += " WHERE h.date_captured = (SELECT MAX(date_captured) FROM investment_holdings)"
 
-    return pd.read_sql(query, engine)
+    df = pd.read_sql(query, engine)
+    return _apply_account_exclusions(df)
 
 
 def get_transactions_df() -> pd.DataFrame:
@@ -47,6 +82,7 @@ def get_transactions_df() -> pd.DataFrame:
         pd.DataFrame: DataFrame containing all transactions.
     """
     df = pd.read_sql("SELECT * FROM transactions", engine)
+    df = _apply_account_exclusions(df)
     if not df.empty:
         df["date"] = pd.to_datetime(df["date"])
     return df
@@ -142,6 +178,7 @@ def get_investment_transactions_df() -> pd.DataFrame:
     LEFT JOIN securities s ON it.security_id = s.security_id
     """
     df = pd.read_sql(query, engine)
+    df = _apply_account_exclusions(df)
     if not df.empty:
         df["date"] = pd.to_datetime(df["date"])
     return df

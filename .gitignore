@@ -1,6 +1,7 @@
 **/instructions.md
 
 .sample/
+.archive/
 .idea/
 .gemini/
 .env
@@ -222,3 +223,4 @@ dist
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+anonymize.txt

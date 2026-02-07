@@ -3,13 +3,87 @@
 import requests
 import json
 import statistics
+import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from dotenv import load_dotenv, find_dotenv
 from collections import Counter
 from sqlmodel import select, Session
 from analysis.db.session import engine
-from analysis.db.models import Transaction, CategoryRule
+from analysis.db.models import Transaction, CategoryRule, Account
 from analysis.utils import clean_name
 
-LLM_URL = "http://127.0.0.1:8080/v1/chat/completions"
+load_dotenv(find_dotenv(), override=True)
+
+LLM_URL = os.getenv("LLM_ENDPOINT", "http://127.0.0.1:8080/v1/chat/completions")
+LLM_WORKERS = max(1, int(os.getenv("LLM_WORKERS", "4")))
+
+
+def _parse_csv_env(name: str) -> set[str]:
+    value = os.getenv(name, "")
+    return {v.strip() for v in value.split(",") if v.strip()}
+
+
+def _fetch_transactions(session: Session) -> list[Transaction]:
+    """Fetch transactions, excluding those from ignored accounts.
+
+    Args:
+        session: SQLModel session.
+
+    Returns:
+        List of Transaction objects to process.
+    """
+    excluded_ids = _parse_csv_env("EXCLUDED_ACCOUNT_IDS")
+    excluded_names = {n.lower() for n in _parse_csv_env("EXCLUDED_ACCOUNT_NAMES")}
+    
+    if excluded_names:
+        accounts = session.exec(select(Account)).all()
+        for a in accounts:
+            if a.name and a.name.lower() in excluded_names:
+                excluded_ids.add(a.account_id)
+
+    if excluded_ids:
+        print(f"Excluding {len(excluded_ids)} account(s) from categorization.")
+    
+    # In a real prod env, we might want to filter in SQL, but for local 
+    # finance, filtering in Python after fetch is acceptable and keeps 
+    # the 'excluded_names' logic simple without complex joins.
+    all_tx = session.exec(select(Transaction)).all()
+    
+    if not excluded_ids:
+        return list(all_tx)
+
+    valid_tx = [t for t in all_tx if t.account_id not in excluded_ids]
+    skipped = len(all_tx) - len(valid_tx)
+    if skipped > 0:
+        print(f"Skipped {skipped} transaction(s) due to exclusions.")
+        
+    return valid_tx
+
+
+def _group_transactions(transactions: list[Transaction]) -> dict[str, dict]:
+    """Group transactions by merchant name or cleaned name pattern.
+
+    Args:
+        transactions: List of transactions.
+
+    Returns:
+        Dictionary of clusters keyed by pattern/merchant name.
+    """
+    clusters = {}
+    for tx in transactions:
+        if tx.merchant_name:
+            key = tx.merchant_name
+            ktype = "merchant_name"
+        else:
+            key = clean_name(tx.name)
+            ktype = "pattern"
+
+        if key not in clusters:
+            clusters[key] = {"type": ktype, "txs": []}
+        clusters[key]["txs"].append(tx)
+    
+    return clusters
+
 
 CATEGORIES = [
     "Groceries",
@@ -129,75 +203,85 @@ def get_cluster_stats(transactions: list) -> dict:
     }
 
 
+def _process_categorization(session: Session, clusters: dict[str, dict]) -> None:
+    """Submit clusters to LLM and save rules.
+
+    Args:
+        session: Database session.
+        clusters: Grouped transactions.
+    """
+    new_rules = 0
+    pending = []
+
+    # 1. Filter out existing rules
+    for key, data in clusters.items():
+        existing = session.exec(
+            select(CategoryRule).where(
+                (CategoryRule.match_value == key)
+                & (CategoryRule.match_type == data["type"])
+            )
+        ).first()
+
+        if not existing:
+            stats = get_cluster_stats(data["txs"])
+            context = {"pattern": key, "type": data["type"], **stats}
+            pending.append((key, data["type"], len(data["txs"]), context))
+
+    if not pending:
+        print("No new merchants/patterns to categorize.")
+        return
+
+    print(f"Queued {len(pending)} patterns for LLM categorization with {LLM_WORKERS} workers.")
+
+    # 2. Parallel LLM Querying
+    results = []
+    with ThreadPoolExecutor(max_workers=LLM_WORKERS) as executor:
+        future_map = {
+            executor.submit(query_llm, context): (key, match_type, tx_count)
+            for key, match_type, tx_count, context in pending
+        }
+
+        for future in as_completed(future_map):
+            key, match_type, tx_count = future_map[future]
+            try:
+                result = future.result()
+            except Exception as e:
+                print(f"LLM Error for [{match_type}]: {key}: {e}")
+                continue
+
+            if result:
+                category, flow_type = result
+                print(f"Categorized [{match_type}]: {key} ({tx_count} txs) -> {category} ({flow_type})")
+                results.append((key, match_type, category, flow_type))
+
+    # 3. Save Rules
+    for key, match_type, category, flow_type in results:
+        rule = CategoryRule(
+            match_value=key,
+            match_type=match_type,
+            category=category,
+            flow_type=flow_type,
+        )
+        session.add(rule)
+        new_rules += 1
+
+        if new_rules % 10 == 0:
+            session.commit()
+
+    session.commit()
+    print(f"Categorization complete. Added {new_rules} new rules.")
+
+
 def run_categorization() -> None:
     """Orchestrates the categorization process for uncategorized transaction patterns."""
     with Session(engine) as session:
-        # 1. Fetch all transactions
-        all_tx = session.exec(select(Transaction)).all()
-        print(f"Loaded {len(all_tx)} transactions.")
-
-        # 2. Group by Key
-        # Priority: Merchant Name -> Cleaned Name
-        clusters = {}
-
-        for tx in all_tx:
-            if tx.merchant_name:
-                key = tx.merchant_name
-                ktype = "merchant_name"
-            else:
-                key = clean_name(tx.name)
-                ktype = "pattern"
-
-            if key not in clusters:
-                clusters[key] = {"type": ktype, "txs": []}
-            clusters[key]["txs"].append(tx)
-
+        transactions = _fetch_transactions(session)
+        print(f"Loaded {len(transactions)} valid transactions.")
+        
+        clusters = _group_transactions(transactions)
         print(f"Identified {len(clusters)} unique patterns/merchants.")
-
-        # 3. Process Clusters
-        new_rules = 0
-
-        for key, data in clusters.items():
-            # Check if rule exists
-            existing = session.exec(
-                select(CategoryRule).where(
-                    (CategoryRule.match_value == key)
-                    & (CategoryRule.match_type == data["type"])
-                )
-            ).first()
-
-            if existing:
-                continue
-
-            # Analyze Cluster
-            stats = get_cluster_stats(data["txs"])
-
-            context = {"pattern": key, "type": data["type"], **stats}
-
-            print(f"Categorizing [{data['type']}]: {key} ({len(data['txs'])} txs)...")
-            # print(f"  Context: {json.dumps(stats)}")
-
-            result = query_llm(context)
-            if result is None:
-                continue
-
-            category, flow_type = result
-            print(f"  -> {category} ({flow_type})")
-
-            rule = CategoryRule(
-                match_value=key,
-                match_type=data["type"],
-                category=category,
-                flow_type=flow_type,
-            )
-            session.add(rule)
-            new_rules += 1
-
-            if new_rules % 10 == 0:
-                session.commit()
-
-        session.commit()
-        print(f"Categorization complete. Added {new_rules} new rules.")
+        
+        _process_categorization(session, clusters)
 
 
 if __name__ == "__main__":

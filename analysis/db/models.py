@@ -1,7 +1,6 @@
 """SQLModel database models for financial data."""
 
 from datetime import date
-from typing import Optional
 from sqlmodel import Field, SQLModel, Relationship, JSON
 from sqlalchemy import Column
 
@@ -68,7 +67,7 @@ class InvestmentTransaction(SQLModel, table=True):
     raw_json: dict | list | None = Field(default=None, sa_column=Column(JSON))
 
     # Relationships
-    security: Optional[Security] = Relationship()
+    security: "Security | None" = Relationship()
 
 
 class InvestmentHolding(SQLModel, table=True):
@@ -88,7 +87,7 @@ class InvestmentHolding(SQLModel, table=True):
     raw_json: dict | list | None = Field(default=None, sa_column=Column(JSON))
 
     # Relationships
-    security: Optional[Security] = Relationship(back_populates="holdings")
+    security: "Security | None" = Relationship(back_populates="holdings")
 
 
 class Account(SQLModel, table=True):

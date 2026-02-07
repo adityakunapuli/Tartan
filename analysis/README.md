@@ -33,3 +33,22 @@ python -m analysis.services.llm_categorizer
 # Report
 python -m analysis.reporting.portfolio_summary
 ```
+
+## Manual Data (Gitignored)
+Sensitive personal inputs are stored outside tracked code in `.archive/manual_data.json`.
+This file is gitignored and loaded by `analysis/reporting/financial_health.py` at runtime.
+
+Expected format:
+
+```json
+{
+  "monthly_spouse_income": 0.0,
+  "vesting_schedule": [
+    {
+      "description": "RSU Vest 1",
+      "date": "2026-05-15",
+      "amount_post_tax": 12345.67
+    }
+  ]
+}
+```
