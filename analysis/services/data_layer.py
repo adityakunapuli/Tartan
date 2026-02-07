@@ -2,12 +2,11 @@
 
 import os
 import pandas as pd
-from dotenv import load_dotenv
+from dotenv import load_dotenv, find_dotenv
 from analysis.db.session import engine
 from analysis.utils import clean_name
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-load_dotenv(os.path.join(BASE_DIR, ".env"), override=True)
+load_dotenv(find_dotenv(), override=True)
 
 
 def _parse_csv_env(name: str) -> set[str]:
