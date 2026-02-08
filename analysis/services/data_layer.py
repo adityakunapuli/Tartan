@@ -1,25 +1,30 @@
 """Data access layer for retrieving financial data as DataFrames."""
 
-import os
 import pandas as pd
-from dotenv import load_dotenv, find_dotenv
+from dotenv import find_dotenv, load_dotenv
+
 from analysis.db.session import engine
 from analysis.utils import clean_name
+from analysis.utils.config import parse_csv_env
 
 load_dotenv(find_dotenv(), override=True)
 
 
-def _parse_csv_env(name: str) -> set[str]:
-    value = os.getenv(name, "")
-    return {v.strip() for v in value.split(",") if v.strip()}
-
-
 def _apply_account_exclusions(df: pd.DataFrame) -> pd.DataFrame:
+    """Filters out rows associated with excluded accounts.
+
+    Args:
+        df (pd.DataFrame): The DataFrame containing financial data.
+            Must have an 'account_id' column.
+
+    Returns:
+        pd.DataFrame: The filtered DataFrame with excluded accounts removed.
+    """
     if df.empty or "account_id" not in df.columns:
         return df
 
-    excluded_ids = _parse_csv_env("EXCLUDED_ACCOUNT_IDS")
-    excluded_names = {n.lower() for n in _parse_csv_env("EXCLUDED_ACCOUNT_NAMES")}
+    excluded_ids = parse_csv_env("EXCLUDED_ACCOUNT_IDS")
+    excluded_names = {n.lower() for n in parse_csv_env("EXCLUDED_ACCOUNT_NAMES")}
 
     if excluded_names:
         accounts = pd.read_sql("SELECT account_id, name FROM accounts", engine)
@@ -52,6 +57,7 @@ def get_denormalized_holdings(date_captured: str | None = None) -> pd.DataFrame:
     SELECT 
         h.date_captured,
         h.account_id,
+        a.name as account_name,
         h.quantity,
         h.institution_price,
         h.institution_value,
@@ -62,6 +68,7 @@ def get_denormalized_holdings(date_captured: str | None = None) -> pd.DataFrame:
         s.currency
     FROM investment_holdings h
     LEFT JOIN securities s ON h.security_id = s.security_id
+    LEFT JOIN accounts a ON h.account_id = a.account_id
     """
 
     if date_captured:
@@ -123,43 +130,65 @@ def get_enriched_transactions_df() -> pd.DataFrame:
     )
 
     def apply_rule(row: pd.Series) -> pd.Series:
-        default = pd.Series({'enriched_category': 'Uncategorized', 'flow_type': 'EXPENSE'})
-        
+        default = pd.Series(
+            {"enriched_category": "Uncategorized", "flow_type": "EXPENSE"}
+        )
+
         # 1. Try Merchant Match
-        if row['merchant_name'] and row['merchant_name'] in merchant_map:
-            match = merchant_map[row['merchant_name']]
-            return pd.Series({'enriched_category': match['category'], 'flow_type': match['flow_type']})
-            
+        if row["merchant_name"] and row["merchant_name"] in merchant_map:
+            match = merchant_map[row["merchant_name"]]
+            return pd.Series(
+                {
+                    "enriched_category": match["category"],
+                    "flow_type": match["flow_type"],
+                }
+            )
+
         # 2. Try Pattern Match
-        c_name = clean_name(row['name'])
+        c_name = clean_name(row["name"])
         if c_name in pattern_map:
             match = pattern_map[c_name]
-            return pd.Series({'enriched_category': match['category'], 'flow_type': match['flow_type']})
-            
+            return pd.Series(
+                {
+                    "enriched_category": match["category"],
+                    "flow_type": match["flow_type"],
+                }
+            )
+
         return default
 
     df[["enriched_category", "flow_type"]] = df.apply(apply_rule, axis=1)
-    
+
     # 4. Vectorized Heuristic Fallback (Safety Net)
     # Catch transfers and income that might have been missed
-    mask = df['name'].str.upper().str.contains('TRANSFER|GOLDMAN SACHS|ONLINE BANKING|PAYMENT TO|CREDIT CRD|VACP TREAS|VA BENEF|GUSTO|PAYROLL|MR. COOPER', regex=True, na=False)
-    uncat_mask = df['enriched_category'] == 'Uncategorized'
-    
+    mask = df["name"].str.upper().str.contains(
+        "TRANSFER|GOLDMAN SACHS|ONLINE BANKING|PAYMENT TO|CREDIT CRD|VACP TREAS|"
+        "VA BENEF|GUSTO|PAYROLL|MR. COOPER",
+        regex=True,
+        na=False,
+    )
+    uncat_mask = df["enriched_category"] == "Uncategorized"
+
     final_mask = mask & uncat_mask
-    
+
     if final_mask.any():
         # Determine if it's Income or Transfer based on common keywords
         # This is a bit crude but safer than 'EXPENSE'
-        income_mask = df['name'].str.upper().str.contains('VACP TREAS|VA BENEF|GUSTO|PAYROLL', regex=True, na=False)
-        
-        df.loc[final_mask & income_mask, 'enriched_category'] = 'Income'
-        df.loc[final_mask & income_mask, 'flow_type'] = 'INCOME'
-        
+        income_mask = (
+            df["name"]
+            .str.upper()
+            .str.contains("VACP TREAS|VA BENEF|GUSTO|PAYROLL", regex=True, na=False)
+        )
+
+        df.loc[final_mask & income_mask, "enriched_category"] = "Income"
+        df.loc[final_mask & income_mask, "flow_type"] = "INCOME"
+
         # Everything else in the final_mask is a Transfer
-        df.loc[final_mask & ~income_mask, 'enriched_category'] = 'Transfer'
-        df.loc[final_mask & ~income_mask, 'flow_type'] = 'TRANSFER'
-        
+        df.loc[final_mask & ~income_mask, "enriched_category"] = "Transfer"
+        df.loc[final_mask & ~income_mask, "flow_type"] = "TRANSFER"
+
     return df
+
 
 def get_investment_transactions_df() -> pd.DataFrame:
     """Returns all investment transactions joined with securities.

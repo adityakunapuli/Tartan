@@ -12,6 +12,7 @@ dependencies = [
     "pydantic>=2.12.5",
     "python-dotenv>=1.2.1",
     "requests>=2.31.0",
+    "ruff>=0.14.11",
     "sqlalchemy>=2.0.0",
     "sqlmodel>=0.0.31",
     "uvicorn>=0.27.0",
@@ -22,3 +23,12 @@ dev = [
     "pre-commit>=4.5.1",
     "ruff>=0.14.11",
 ]
+
+[tool.ruff.lint]
+select = ["D"]
+# D203: 1 blank line required before class docstring (conflicts with D211: No blank lines allowed before class docstring)
+# D213: Multi-line docstring summary should start at the second line (conflicts with D212: Multi-line docstring summary should start at the first line)
+ignore = ["D203", "D213"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"

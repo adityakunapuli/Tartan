@@ -1,18 +1,26 @@
+"""Backend service for Plaid Link authentication utility.
+
+This service provides endpoints to create link tokens and exchange public tokens
+for access tokens, facilitating the Plaid Link flow.
+"""
+
 import os
+import time
+
+import plaid
+import uvicorn
+from dotenv import find_dotenv, load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-import plaid
 from plaid.api import plaid_api
-from plaid.model.link_token_create_request import LinkTokenCreateRequest
-from plaid.model.link_token_create_request_user import LinkTokenCreateRequestUser
-from plaid.model.products import Products
 from plaid.model.country_code import CountryCode
 from plaid.model.item_public_token_exchange_request import (
     ItemPublicTokenExchangeRequest,
 )
-from dotenv import load_dotenv, find_dotenv
-import time
+from plaid.model.link_token_create_request import LinkTokenCreateRequest
+from plaid.model.link_token_create_request_user import LinkTokenCreateRequestUser
+from plaid.model.products import Products
+from pydantic import BaseModel
 
 # Load .env
 load_dotenv(find_dotenv())
@@ -30,7 +38,12 @@ app.add_middleware(
 PLAID_CLIENT_ID = os.getenv("PLAID_CLIENT_ID")
 PLAID_SECRET = os.getenv("PLAID_SECRET")
 PLAID_ENV = os.getenv("PLAID_ENV", "sandbox")
-PLAID_PRODUCTS = [p.strip() for p in os.getenv('PLAID_PRODUCTS', 'transactions,investments,liabilities').split(',')]
+PLAID_PRODUCTS = [
+    p.strip()
+    for p in os.getenv("PLAID_PRODUCTS", "transactions,investments,liabilities").split(
+        ","
+    )
+]
 PLAID_OPTIONAL_PRODUCTS = [
     p.strip() for p in os.getenv("PLAID_OPTIONAL_PRODUCTS", "").split(",") if p.strip()
 ]
@@ -54,11 +67,28 @@ client = plaid_api.PlaidApi(api_client)
 
 
 class TokenExchangeRequest(BaseModel):
+    """Request model for exchanging a public token for an access token.
+
+    Attributes:
+        public_token (str): The temporary public token returned by Plaid Link.
+    """
+
     public_token: str
 
 
 @app.post("/api/create_link_token")
-async def create_link_token():
+async def create_link_token() -> dict:
+    """Creates a Plaid Link token.
+
+    Initializes the Plaid Link flow by creating a link token with the configured
+    products and settings.
+
+    Returns:
+        dict: The response from Plaid containing the link_token.
+
+    Raises:
+        HTTPException: If the Plaid API call fails.
+    """
     try:
         products = [Products(p) for p in PLAID_PRODUCTS]
         optional_products = [Products(p) for p in PLAID_OPTIONAL_PRODUCTS]
@@ -87,7 +117,18 @@ async def create_link_token():
 
 
 @app.post("/api/set_access_token")
-async def set_access_token(request: TokenExchangeRequest):
+async def set_access_token(request: TokenExchangeRequest) -> dict:
+    """Exchanges a public token for an access token.
+
+    Args:
+        request (TokenExchangeRequest): The request containing the public token.
+
+    Returns:
+        dict: A dictionary containing the new access_token.
+
+    Raises:
+        HTTPException: If the token exchange fails.
+    """
     try:
         exchange_request = ItemPublicTokenExchangeRequest(
             public_token=request.public_token
@@ -101,6 +142,4 @@ async def set_access_token(request: TokenExchangeRequest):
 
 
 if __name__ == "__main__":
-    import uvicorn
-
     uvicorn.run(app, host="0.0.0.0", port=8000)
