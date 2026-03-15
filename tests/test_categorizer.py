@@ -2,11 +2,14 @@
 
 import pytest
 import datetime
+import unittest
 from unittest.mock import patch, MagicMock
 from sqlmodel import select
 
-from db.models import Transaction, CategoryRule, Account
-from services.llm_categorizer import (
+from backend.modules.transactions.models import Transaction
+from backend.modules.rules.models import CategoryRule
+from backend.modules.accounts.models import Account
+from backend.modules.analytics.categorizer import (
     _fetch_transactions,
     _group_transactions,
     query_llm,
@@ -33,11 +36,11 @@ def categorizer_data(db_session):
 
 def test_fetch_transactions_exclusions(db_session, categorizer_data):
     """Test that fetch respects exclusions."""
-    with patch("config.Config.EXCLUDED_ACCOUNT_IDS", {"a1"}):
+    with patch("backend.core.config.Settings.excluded_account_ids", new_callable=unittest.mock.PropertyMock, return_value={"a1"}):
         txs = _fetch_transactions(db_session)
         assert len(txs) == 0
 
-    with patch("config.Config.EXCLUDED_ACCOUNT_IDS", set()):
+    with patch("backend.core.config.Settings.excluded_account_ids", new_callable=unittest.mock.PropertyMock, return_value=set()):
         txs = _fetch_transactions(db_session)
         assert len(txs) == 3
 
@@ -66,7 +69,7 @@ def test_get_cluster_stats(categorizer_data, db_session):
     assert len(stats["sample_names"]) == 2
 
 
-@patch("services.llm_categorizer.requests.post")
+@patch("backend.modules.analytics.categorizer.requests.post")
 def test_query_llm_success(mock_post):
     """Test successful LLM query parsing."""
     mock_response = MagicMock()
@@ -87,7 +90,7 @@ def test_query_llm_success(mock_post):
     assert flow == "EXPENSE"
 
 
-@patch("services.llm_categorizer.query_llm")
+@patch("backend.modules.analytics.categorizer.query_llm")
 def test_process_categorization(mock_query, db_session, categorizer_data):
     """Test full categorization flow: group -> query -> save rule."""
     

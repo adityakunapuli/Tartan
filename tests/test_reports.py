@@ -17,10 +17,10 @@ def patch_db_engine(db_session):
     """Ensure reports use the test database."""
     test_engine = db_session.bind
     
-    # Reports use services.data_layer or db.session directly.
+    # Reports use backend.modules.transactions.logic or db.session directly.
     # We must patch where 'engine' is imported FROM.
     # Actually, we must patch where it is USED.
-    # services.data_layer imports engine from db.session.
+    # backend.modules.transactions.logic imports engine from db.session.
     # reports.financial_health imports engine from db.session.
     # reports.investment_status imports engine from db.session.
     
@@ -32,12 +32,12 @@ def patch_db_engine(db_session):
     
     # reports/financial_health.py: from db.session import engine
     # reports/investment_status.py: from db.session import engine
-    # reports/portfolio_summary.py: DOES NOT import engine. Uses services.data_layer.
+    # reports/portfolio_summary.py: DOES NOT import engine. Uses backend.modules.transactions.logic.
     
     with (
         patch("reports.financial_health.engine", test_engine),
         patch("reports.investment_status.engine", test_engine),
-        patch("services.data_layer.engine", test_engine)
+        patch("backend.modules.transactions.logic.engine", test_engine)
     ):
         yield
 

@@ -1,6 +1,6 @@
 """Reporting script for analyzing the quality and consistency of transaction data."""
 
-from analysis.services.data_layer import get_transactions_df
+from analysis.backend.modules.transactions.logic import get_transactions_df
 
 
 def analyze_transaction_data() -> None:

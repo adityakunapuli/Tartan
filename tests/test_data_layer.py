@@ -3,23 +3,26 @@
 import pandas as pd
 import pytest
 import datetime
+import unittest
 from unittest.mock import patch
 from sqlmodel import Session, select
 
-from db.models import Account, Transaction, CategoryRule
-from services.data_layer import (
+from backend.modules.accounts.models import Account
+from backend.modules.transactions.models import Transaction
+from backend.modules.rules.models import CategoryRule
+from backend.modules.transactions.logic import (
     _apply_account_exclusions,
     get_transactions_df,
     get_enriched_transactions_df,
 )
-from config import Config
+from backend.core.config import settings as Config
 
 
 @pytest.fixture(autouse=True)
 def patch_data_layer_engine(db_session):
-    """Patch the engine in services.data_layer to use the test DB."""
+    """Patch the engine in backend.modules.transactions.logic to use the test DB."""
     # db_session.bind is the engine used by the session
-    with patch("services.data_layer.engine", db_session.bind):
+    with patch("backend.modules.transactions.logic.engine", db_session.bind):
         yield
 
 
@@ -97,8 +100,8 @@ def test_apply_account_exclusions(db_session, sample_data):
     
     # Mock Config to exclude specific IDs and Names
     with (
-        patch("config.Config.EXCLUDED_ACCOUNT_IDS", {"acc_excluded"}),
-        patch("config.Config.EXCLUDED_ACCOUNT_NAMES", set())
+        patch("backend.core.config.Settings.excluded_account_ids", new_callable=unittest.mock.PropertyMock, return_value={"acc_excluded"}),
+        patch("backend.core.config.Settings.excluded_account_names", new_callable=unittest.mock.PropertyMock, return_value=set())
     ):
         
         # Create a DF with mixed accounts
@@ -117,8 +120,8 @@ def test_apply_account_name_exclusions(db_session, sample_data):
     """Test filtering by account name lookup."""
     
     with (
-        patch("config.Config.EXCLUDED_ACCOUNT_IDS", set()),
-        patch("config.Config.EXCLUDED_ACCOUNT_NAMES", {"old 401k"})
+        patch("backend.core.config.Settings.excluded_account_ids", new_callable=unittest.mock.PropertyMock, return_value=set()),
+        patch("backend.core.config.Settings.excluded_account_names", new_callable=unittest.mock.PropertyMock, return_value={"old 401k"})
     ): 
         # Lowercase match check handled by config logic usually, 
         # but here we pass lowercase set as config usually returns.
@@ -139,8 +142,8 @@ def test_get_transactions_df(db_session, sample_data):
     """Test fetching transactions as DataFrame."""
     
     with (
-        patch("config.Config.EXCLUDED_ACCOUNT_IDS", set()),
-        patch("config.Config.EXCLUDED_ACCOUNT_NAMES", set())
+        patch("backend.core.config.Settings.excluded_account_ids", new_callable=unittest.mock.PropertyMock, return_value=set()),
+        patch("backend.core.config.Settings.excluded_account_names", new_callable=unittest.mock.PropertyMock, return_value=set())
     ):
              
         df = get_transactions_df()
@@ -155,8 +158,8 @@ def test_get_enriched_transactions_df(db_session, sample_data):
     """Test categorization logic application."""
     
     with (
-        patch("config.Config.EXCLUDED_ACCOUNT_IDS", set()),
-        patch("config.Config.EXCLUDED_ACCOUNT_NAMES", set())
+        patch("backend.core.config.Settings.excluded_account_ids", new_callable=unittest.mock.PropertyMock, return_value=set()),
+        patch("backend.core.config.Settings.excluded_account_names", new_callable=unittest.mock.PropertyMock, return_value=set())
     ):
              
         df = get_enriched_transactions_df()

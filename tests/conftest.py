@@ -3,7 +3,9 @@
 from unittest.mock import MagicMock
 
 import pytest
-from db.models import Transaction, PlaidItem, Account, InvestmentHolding, Security
+from backend.modules.transactions.models import Transaction
+from backend.modules.accounts.models import PlaidItem, Account
+from backend.modules.investments.models import InvestmentHolding, Security
 from sqlmodel import SQLModel, create_engine, Session
 from sqlalchemy.pool import StaticPool
 

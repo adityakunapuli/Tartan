@@ -3,8 +3,10 @@
 import datetime
 from unittest.mock import MagicMock
 
-from db.models import Account, InvestmentHolding, PlaidItem, Transaction
-from services.plaid_sync import PlaidSyncService
+from backend.modules.accounts.models import Account, PlaidItem
+from backend.modules.investments.models import InvestmentHolding
+from backend.modules.transactions.models import Transaction
+from backend.modules.plaid_integration.sync import PlaidSyncService
 from sqlalchemy import select
 
 
@@ -150,7 +152,7 @@ def test_sync_accounts(db_session, mock_plaid_client):
     )
 
     # Execute
-    inst_id = service.sync_accounts("token_123")
+    inst_id = service.sync_accounts("token_123", "Test Inst")
 
     # Verify Return
     assert inst_id == "ins_test"
@@ -191,7 +193,7 @@ def test_sync_transactions_incremental(db_session, mock_plaid_client):
     mock_plaid_client.transactions_sync.side_effect = [resp1]
 
     # Execute
-    service.sync_transactions(token)
+    service.sync_transactions(token, "Test Inst")
 
     # Verify DB
     tx = db_session.execute(
@@ -244,7 +246,7 @@ def test_sync_transactions_removals(db_session, mock_plaid_client):
     mock_plaid_client.transactions_sync.return_value = resp
 
     # Execute
-    service.sync_transactions(token)
+    service.sync_transactions(token, "Test Inst")
 
     # Verify Removal
     tx = db_session.execute(
@@ -315,7 +317,7 @@ def test_sync_holdings_cleanup(db_session, mock_plaid_client):
     mock_plaid_client.investments_holdings_get.return_value = mock_resp
 
     # Execute
-    service.sync_holdings(token)
+    service.sync_holdings(token, "Test Inst")
 
     # Verify: Should still have 1 holding (zombie deleted, new added)
     holdings = db_session.execute(select(InvestmentHolding)).scalars().all()

@@ -4,10 +4,12 @@ import pytest
 from unittest.mock import patch, MagicMock
 from sqlmodel import select
 
-from services.plaid_sync import run_sync
-from services.llm_categorizer import run_categorization
+from backend.modules.plaid_integration.sync import run_sync
+from backend.modules.analytics.categorizer import run_categorization
 from reports.portfolio_summary import print_portfolio_summary
-from db.models import Transaction, CategoryRule, PlaidItem
+from backend.modules.transactions.models import Transaction
+from backend.modules.rules.models import CategoryRule
+from backend.modules.accounts.models import PlaidItem
 import datetime # Import datetime for date object usage in mocks
 
 
@@ -21,8 +23,8 @@ def mock_plaid_env():
     ):
         yield
 
-@patch("services.plaid_sync.PlaidSyncService._get_plaid_client")
-@patch("services.llm_categorizer.query_llm")
+@patch("backend.modules.plaid_integration.sync.PlaidSyncService._get_plaid_client")
+@patch("backend.modules.analytics.categorizer.query_llm")
 def test_full_pipeline_mocked(mock_llm, mock_get_client, db_session, mock_plaid_env):
     """
     Test the full data pipeline:
@@ -43,15 +45,15 @@ def patch_engine(db_session):
     
     # Patch where 'engine' is imported and used directly
     with (
-        patch("services.plaid_sync.engine", test_engine),
-        patch("services.llm_categorizer.engine", test_engine),
-        patch("services.data_layer.engine", test_engine),
-        patch("db.session.engine", test_engine) # Patching db.session.engine ensures init_db works
+        patch("backend.modules.plaid_integration.sync.engine", test_engine),
+        patch("backend.modules.analytics.categorizer.engine", test_engine),
+        patch("backend.modules.transactions.logic.engine", test_engine),
+        patch("backend.core.database.engine", test_engine) # Patching backend.core.database.engine ensures init_db works
     ):
         yield
 
-@patch("services.plaid_sync.PlaidSyncService._get_plaid_client")
-@patch("services.llm_categorizer.query_llm")
+@patch("backend.modules.plaid_integration.sync.PlaidSyncService._get_plaid_client")
+@patch("backend.modules.analytics.categorizer.query_llm")
 def test_full_pipeline_execution(mock_llm, mock_get_client, mock_plaid_env, db_session):
     """Tests the entire pipeline: Sync -> Categorize -> Report."""
     

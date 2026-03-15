@@ -1,0 +1,23 @@
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.backend
+    ports:
+      - "8008:8000"
+    volumes:
+      - ./backend:/app/backend
+      - ./financial_data.db:/app/financial_data.db
+    environment:
+      - DB_URL=sqlite:////app/financial_data.db
+    env_file:
+      - .env
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend

@@ -4,11 +4,13 @@ version = "0.1.0"
 description = "App to setup a plaid-based ETL pipeline q+ analysis."
 requires-python = ">=3.13"
 dependencies = [
+    "apscheduler>=3.11.2",
     "fastapi>=0.109.0",
     "pandas>=2.3.3",
     "pandas-stubs==2.3.3.251219",
     "plaid-python>=38.0.0",
     "plotly>=6.5.0",
+    "pydantic-settings>=2.13.1",
     "pydantic>=2.12.5",
     "python-dotenv>=1.2.1",
     "requests>=2.31.0",

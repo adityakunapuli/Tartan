@@ -2,7 +2,7 @@
 
 import pandas as pd
 
-from analysis.services.data_layer import get_transactions_df
+from analysis.backend.modules.transactions.logic import get_transactions_df
 from analysis.utils import clean_name
 
 

@@ -1,6 +1,6 @@
 """Reporting script for generating portfolio summaries and spending analysis."""
 
-from services.data_layer import (
+from backend.modules.transactions.logic import (
     get_enriched_transactions_df,
     get_denormalized_holdings,
     get_investment_transactions_df,
