@@ -3,8 +3,8 @@
 import datetime
 from unittest.mock import MagicMock
 
-from analysis.db.models import Account, InvestmentHolding, PlaidItem, Transaction
-from analysis.services.sync import sync_accounts, sync_holdings, sync_transactions
+from db.models import Account, InvestmentHolding, PlaidItem, Transaction
+from services.plaid_sync import PlaidSyncService
 from sqlalchemy import select
 
 
@@ -141,13 +141,16 @@ def test_sync_accounts(db_session, mock_plaid_client):
         mock_plaid_client: The mock Plaid client fixture.
     """
     # Setup
+    service = PlaidSyncService(db_session)
+    service.client = mock_plaid_client  # Override with mock
+
     acc = MockAccount("acc_1", 100.0)
     mock_plaid_client.accounts_get.return_value = MockAccountResponse(
         [acc], inst_id="ins_test"
     )
 
     # Execute
-    inst_id = sync_accounts(db_session, mock_plaid_client, "token_123")
+    inst_id = service.sync_accounts("token_123")
 
     # Verify Return
     assert inst_id == "ins_test"
@@ -171,6 +174,9 @@ def test_sync_transactions_incremental(db_session, mock_plaid_client):
     db_session.add(PlaidItem(access_token=token, next_cursor="cursor_1"))
     db_session.commit()
 
+    service = PlaidSyncService(db_session)
+    service.client = mock_plaid_client
+
     # Mock Plaid Response
     # 1. First Page: 1 Added
     tx1 = MockTransaction("tx_1", 50.0, "Walmart")
@@ -185,7 +191,7 @@ def test_sync_transactions_incremental(db_session, mock_plaid_client):
     mock_plaid_client.transactions_sync.side_effect = [resp1]
 
     # Execute
-    sync_transactions(db_session, mock_plaid_client, token)
+    service.sync_transactions(token)
 
     # Verify DB
     tx = db_session.execute(
@@ -223,6 +229,9 @@ def test_sync_transactions_removals(db_session, mock_plaid_client):
     )
     db_session.commit()
 
+    service = PlaidSyncService(db_session)
+    service.client = mock_plaid_client
+
     # Mock Response: 1 Removed
     removed_item = {"transaction_id": "tx_del"}
     resp = MockSyncResponse(
@@ -235,7 +244,7 @@ def test_sync_transactions_removals(db_session, mock_plaid_client):
     mock_plaid_client.transactions_sync.return_value = resp
 
     # Execute
-    sync_transactions(db_session, mock_plaid_client, token)
+    service.sync_transactions(token)
 
     # Verify Removal
     tx = db_session.execute(
@@ -268,6 +277,9 @@ def test_sync_holdings_cleanup(db_session, mock_plaid_client):
     )
     db_session.add(h1)
     db_session.commit()
+
+    service = PlaidSyncService(db_session)
+    service.client = mock_plaid_client
 
     # Mock Response: Same holding, maybe updated value
     # Plaid returns holdings list
@@ -303,7 +315,7 @@ def test_sync_holdings_cleanup(db_session, mock_plaid_client):
     mock_plaid_client.investments_holdings_get.return_value = mock_resp
 
     # Execute
-    sync_holdings(db_session, mock_plaid_client, token)
+    service.sync_holdings(token)
 
     # Verify: Should still have 1 holding (zombie deleted, new added)
     holdings = db_session.execute(select(InvestmentHolding)).scalars().all()

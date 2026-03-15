@@ -34,10 +34,7 @@ class ColoredConsoleHandler(logging.StreamHandler):
 
     def format(self, record: logging.LogRecord) -> str:
         """Formats the log record with colors if the stream is a TTY."""
-        # Standard formatting first
-        msg = super().format(record)
-        
-        # Determine color
+        # Determine color for level and message
         color = WHITE
         if record.levelno >= logging.ERROR:
             color = RED
@@ -48,25 +45,19 @@ class ColoredConsoleHandler(logging.StreamHandler):
         elif record.levelno == logging.DEBUG:
             color = CYAN
 
-        # Apply color if output is a terminal
-        if self.stream.isatty():
-             # We can't just wrap the whole message because the formatter likely
-             # produced [Time] [Level] [File] Message. 
-             # We want to colorize the Level and potentially the Message.
-             # However, for simplicity and robustness in this custom handler,
-             # let's colorize the whole line for errors/warnings, or just the level.
-             # Custom format defined in Logger class is:
-             # [TIME] [LEVEL] [FILE:LINE] MESSAGE
-             
-             # Let's replace the level name with a colored version in the string
-             levelname = record.levelname
-             msg = msg.replace(f"[{levelname}]", f"[{color}{levelname}{RESET}]")
-             
-             # If Error, color the message too
-             if record.levelno >= logging.ERROR:
-                 msg = f"{msg} {color}(Stack Trace follows if available){RESET}"
+        # Custom format: [TIME PST] [LEVEL] MESSAGE
+        # Get formatted time (already in PST from formatter)
+        dt = datetime.fromtimestamp(record.created, tz=ZoneInfo("US/Pacific"))
+        time_str = dt.strftime("%H:%M:%S")
 
-        return msg
+        # Force colorize components (IDEs like PyCharm often fail isatty() checks but support ANSI)
+        formatted_msg = (
+            f"{WHITE}[{time_str} PST]{RESET} "
+            f"[{color}{record.levelname:^7}{RESET}] "
+            f"{color if record.levelno >= logging.WARNING else WHITE}{record.getMessage()}{RESET}"
+        )
+
+        return formatted_msg
 
 class Logger:
     """Singleton-like logger factory for the application."""
@@ -96,9 +87,8 @@ class Logger:
         handler.setLevel(level)
 
         # Create Formatter
-        # Format: [HH:MM:SS PST] [LEVEL] [file.py:line] Message
-        # Note: 'PST' is hardcoded text here because formatTime handles the actual conversion
-        fmt = "[%(asctime)s PST] [%(levelname)s] [%(filename)s:%(lineno)d] %(message)s"
+        # Format: [HH:MM:SS PST] [LEVEL] Message
+        fmt = "[%(asctime)s PST] [%(levelname)s] %(message)s"
         datefmt = "%H:%M:%S"
         
         formatter = PSTFormatter(fmt, datefmt=datefmt)
@@ -126,11 +116,8 @@ class Logger:
         if exc_info and exc_info[0]:
             tb_lines = traceback.format_exception(*exc_info)
             tb_text = "".join(tb_lines)
-            # Print stack trace in Red
-            if sys.stdout.isatty():
-                print(f"{RED}{tb_text}{RESET}", file=sys.stderr)
-            else:
-                print(tb_text, file=sys.stderr)
+            # Print stack trace in Red (forced for IDE compatibility)
+            print(f"{RED}{tb_text}{RESET}", file=sys.stderr)
 
 # Global accessor
 def get_logger(name: str) -> logging.Logger:

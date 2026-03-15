@@ -1,15 +1,12 @@
 """Database session management."""
 
-import os
 from collections.abc import Iterator
 from sqlmodel import SQLModel, create_engine, Session
 
-# Construct absolute path to the database file
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DB_FILE = os.path.join(BASE_DIR, "financial_data.db")
-DB_PATH = f"sqlite:///{DB_FILE}"
+from config import Config
 
-engine = create_engine(DB_PATH)
+# Use the centralized DB path
+engine = create_engine(Config.DB_URL)
 
 
 def init_db() -> None:

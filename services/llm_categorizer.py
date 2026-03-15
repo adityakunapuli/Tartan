@@ -1,26 +1,29 @@
 """Service for categorizing transactions using a local LLM."""
 
-import requests
 import json
 import statistics
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dotenv import load_dotenv, find_dotenv
 from collections import Counter
+import requests
 from sqlmodel import select, Session
-from analysis.db.session import engine
-from analysis.db.models import Transaction, CategoryRule, Account
-from analysis.utils import clean_name
 
-load_dotenv(find_dotenv(), override=True)
+from config import Config
+from db.session import engine
+from db.models import Transaction, CategoryRule, Account
+from utils.helpers import clean_name
+from utils.logger import get_logger
 
-LLM_URL = os.getenv("LLM_ENDPOINT", "http://127.0.0.1:8080/v1/chat/completions")
+from dotenv import load_dotenv
+
+load_dotenv()
+
+logger = get_logger(__name__)
+
+# LLM Configuration
+OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 LLM_WORKERS = max(1, int(os.getenv("LLM_WORKERS", "4")))
-
-
-def _parse_csv_env(name: str) -> set[str]:
-    value = os.getenv(name, "")
-    return {v.strip() for v in value.split(",") if v.strip()}
 
 
 def _fetch_transactions(session: Session) -> list[Transaction]:
@@ -32,8 +35,8 @@ def _fetch_transactions(session: Session) -> list[Transaction]:
     Returns:
         List of Transaction objects to process.
     """
-    excluded_ids = _parse_csv_env("EXCLUDED_ACCOUNT_IDS")
-    excluded_names = {n.lower() for n in _parse_csv_env("EXCLUDED_ACCOUNT_NAMES")}
+    excluded_ids = Config.EXCLUDED_ACCOUNT_IDS.copy()
+    excluded_names = Config.EXCLUDED_ACCOUNT_NAMES
     
     if excluded_names:
         accounts = session.exec(select(Account)).all()
@@ -42,7 +45,7 @@ def _fetch_transactions(session: Session) -> list[Transaction]:
                 excluded_ids.add(a.account_id)
 
     if excluded_ids:
-        print(f"Excluding {len(excluded_ids)} account(s) from categorization.")
+        logger.info(f"Excluding {len(excluded_ids)} account(s) from categorization.")
     
     # In a real prod env, we might want to filter in SQL, but for local 
     # finance, filtering in Python after fetch is acceptable and keeps 
@@ -55,7 +58,7 @@ def _fetch_transactions(session: Session) -> list[Transaction]:
     valid_tx = [t for t in all_tx if t.account_id not in excluded_ids]
     skipped = len(all_tx) - len(valid_tx)
     if skipped > 0:
-        print(f"Skipped {skipped} transaction(s) due to exclusions.")
+        logger.info(f"Skipped {skipped} transaction(s) due to exclusions.")
         
     return valid_tx
 
@@ -155,7 +158,7 @@ def query_llm(context_data: dict) -> tuple[str, str] | None:
     }
 
     try:
-        response = requests.post(LLM_URL, json=payload, timeout=30)
+        response = requests.post(OPENAI_BASE_URL, json=payload, timeout=30)
         response.raise_for_status()
         result = response.json()
         content = result["choices"][0]["message"]["content"]
@@ -166,12 +169,12 @@ def query_llm(context_data: dict) -> tuple[str, str] | None:
         return data.get("category", "General"), data.get("flow_type", "EXPENSE")
 
     except requests.exceptions.ConnectionError:
-        print(
-            f"  -> Warning: LLM endpoint ({LLM_URL}) is unreachable. Skipping categorization."
+        logger.warning(
+            f"LLM endpoint ({OPENAI_BASE_URL}) is unreachable. Skipping categorization."
         )
         return None
     except Exception as e:
-        print(f"LLM Error: {e}")
+        logger.error(f"LLM Error: {e}")
         return "General", "EXPENSE"
 
 
@@ -228,10 +231,10 @@ def _process_categorization(session: Session, clusters: dict[str, dict]) -> None
             pending.append((key, data["type"], len(data["txs"]), context))
 
     if not pending:
-        print("No new merchants/patterns to categorize.")
+        logger.info("No new merchants/patterns to categorize.")
         return
 
-    print(f"Queued {len(pending)} patterns for LLM categorization with {LLM_WORKERS} workers.")
+    logger.info(f"Queued {len(pending)} patterns for LLM categorization with {LLM_WORKERS} workers.")
 
     # 2. Parallel LLM Querying
     results = []
@@ -246,12 +249,12 @@ def _process_categorization(session: Session, clusters: dict[str, dict]) -> None
             try:
                 result = future.result()
             except Exception as e:
-                print(f"LLM Error for [{match_type}]: {key}: {e}")
+                logger.error(f"LLM Error for [{match_type}]: {key}: {e}")
                 continue
 
             if result:
                 category, flow_type = result
-                print(f"Categorized [{match_type}]: {key} ({tx_count} txs) -> {category} ({flow_type})")
+                logger.info(f"Categorized [{match_type}]: {key} ({tx_count} txs) -> {category} ({flow_type})")
                 results.append((key, match_type, category, flow_type))
 
     # 3. Save Rules
@@ -269,17 +272,17 @@ def _process_categorization(session: Session, clusters: dict[str, dict]) -> None
             session.commit()
 
     session.commit()
-    print(f"Categorization complete. Added {new_rules} new rules.")
+    logger.info(f"Categorization complete. Added {new_rules} new rules.")
 
 
 def run_categorization() -> None:
     """Orchestrates the categorization process for uncategorized transaction patterns."""
     with Session(engine) as session:
         transactions = _fetch_transactions(session)
-        print(f"Loaded {len(transactions)} valid transactions.")
+        logger.info(f"Loaded {len(transactions)} valid transactions.")
         
         clusters = _group_transactions(transactions)
-        print(f"Identified {len(clusters)} unique patterns/merchants.")
+        logger.info(f"Identified {len(clusters)} unique patterns/merchants.")
         
         _process_categorization(session, clusters)
 

@@ -1,11 +1,14 @@
 """Service for syncing financial data from Plaid to the local database."""
 
+import os
+import sys
+
+# Ensure the root project directory is in the Python path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 import datetime
 import json
-import os
-
 import plaid
-from dotenv import find_dotenv, load_dotenv
 from plaid.api import plaid_api
 from plaid.model.accounts_get_request import AccountsGetRequest
 from plaid.model.country_code import CountryCode
@@ -21,7 +24,8 @@ from plaid.model.liabilities_get_request import LiabilitiesGetRequest
 from plaid.model.transactions_sync_request import TransactionsSyncRequest
 from sqlmodel import Session, delete, select
 
-from analysis.db.models import (
+from config import Config
+from db.models import (
     Account,
     InvestmentHolding,
     InvestmentTransaction,
@@ -30,69 +34,78 @@ from analysis.db.models import (
     Security,
     Transaction,
 )
-from analysis.db.session import engine, init_db
-from analysis.utils import make_json_serializable
-from analysis.utils.config import get_excluded_account_ids
+from db.session import init_db, engine
+from utils.helpers import make_json_serializable
+from utils.logger import get_logger
 
-# Load .env from project root
-load_dotenv(find_dotenv(), override=True)
+logger = get_logger(__name__)
 
 
 class PlaidSyncService:
-    """Orchestrates the synchronization of financial data from Plaid."""
+    """Orchestrates the synchronization of financial data from Plaid.
+
+    This service handles the complex logic of incremental syncs, cursor management,
+    and deduplication of financial data across Transactions, Investments, and Liabilities.
+    """
 
     def __init__(self, session: Session):
         """Initializes the PlaidSyncService.
 
         Args:
-            session (Session): The database session to use for persistence.
+            session (Session): The database session used for persistence.
         """
         self.session = session
         self.client = self._get_plaid_client()
 
-    def _get_plaid_client(self) -> plaid_api.PlaidApi:
-        """Initializes and returns the Plaid API client.
+    @staticmethod
+    def _get_plaid_client() -> plaid_api.PlaidApi:
+        """Initializes and returns the Plaid API client using credentials from Config.
 
         Returns:
             plaid_api.PlaidApi: The authenticated Plaid client.
 
         Raises:
-            ValueError: If PLAID_CLIENT_ID or PLAID_SECRET are missing.
+            ValueError: If credentials are missing in the environment.
         """
-        client_id = os.getenv("PLAID_CLIENT_ID")
-        secret = os.getenv("PLAID_SECRET")
-        env = os.getenv("PLAID_ENV", "sandbox")
-
-        if not client_id or not secret:
+        # Security Note: Config.PLAID_* reads directly from os.getenv()
+        if not Config.PLAID_CLIENT_ID or not Config.PLAID_SECRET:
             raise ValueError("Missing PLAID_CLIENT_ID or PLAID_SECRET in .env")
 
-        host = getattr(plaid.Environment, env.capitalize())
+        host = getattr(plaid.Environment, Config.PLAID_ENV.capitalize())
         configuration = plaid.Configuration(
-            host=host, api_key={"clientId": client_id, "secret": secret}
+            host=host,
+            api_key={
+                "clientId": Config.PLAID_CLIENT_ID,
+                "secret": Config.PLAID_SECRET,
+            },
         )
         api_client = plaid.ApiClient(configuration)
         return plaid_api.PlaidApi(api_client)
 
     def _should_skip_transaction(self, transaction_id: str, account_id: str) -> bool:
-        """Checks if a transaction should be skipped due to ID collision.
+        """Determines if a transaction should be skipped to prevent ID collisions.
+
+        In some rare cases (especially Sandbox), Plaid might re-issue the same
+        transaction_id for a different account. We must detect this to preserve data integrity.
 
         Args:
             transaction_id (str): The Plaid transaction ID.
-            account_id (str): The account ID associated with the transaction.
+            account_id (str): The account ID associated with the incoming transaction.
 
         Returns:
-            bool: True if the transaction should be skipped, False otherwise.
+            bool: True if the transaction exists for a DIFFERENT account, False otherwise.
         """
         existing = self.session.exec(
             select(Transaction).where(Transaction.transaction_id == transaction_id)
         ).first()
+
         if not existing:
             return False
 
         if existing.account_id != account_id:
-            print(
-                "  -> Skipping transaction due to ID collision across accounts: "
-                f"{transaction_id} (existing={existing.account_id}, incoming={account_id})"
+            logger.warning(
+                f"Skipping transaction collision: {transaction_id} "
+                f"(Existing Account: {existing.account_id}, Incoming: {account_id})"
             )
             return True
 
@@ -101,18 +114,20 @@ class PlaidSyncService:
     def sync_transactions(
         self,
         access_token: str,
+        institution_name: str,
         excluded_account_ids: set[str] | None = None,
         seen_tx_keys: set[str] | None = None,
     ) -> None:
-        """Fetches and saves transactions incrementally using /transactions/sync.
+        """Fetches and saves transactions incrementally using the /transactions/sync endpoint.
 
         Args:
             access_token (str): Plaid access token.
-            excluded_account_ids (set[str] | None): Set of account IDs to ignore.
-            seen_tx_keys (set[str] | None): Set of already processed transaction keys
-                (id:account_id) to prevent duplicates within a run.
+            institution_name (str): Name of the institution (for logging).
+            excluded_account_ids (set[str] | None): Set of account IDs to ignore (from .env).
+            seen_tx_keys (set[str] | None): Shared set to track processed (tx_id:acc_id) pairs
+                                            across multiple tokens (if applicable) to avoid duplicates.
         """
-        print("Syncing Transactions (Incremental)...")
+        logger.info("Syncing Transactions (Incremental)...")
 
         # 1. Get the latest cursor for this access token
         plaid_item = self.session.exec(
@@ -120,18 +135,16 @@ class PlaidSyncService:
         ).first()
 
         if not plaid_item:
-            # Create item entry if it doesn't exist
+            # Create item entry if it doesn't exist to store the cursor
             plaid_item = PlaidItem(access_token=access_token)
             self.session.add(plaid_item)
             self.session.commit()
             self.session.refresh(plaid_item)
 
         cursor = plaid_item.next_cursor
-        added_count = 0
-        modified_count = 0
-        removed_count = 0
-
+        stats = {"added": 0, "modified": 0, "removed": 0}
         seen = seen_tx_keys if seen_tx_keys is not None else set()
+
         while True:
             try:
                 request_kwargs = {"access_token": access_token, "count": 500}
@@ -141,18 +154,20 @@ class PlaidSyncService:
                 request = TransactionsSyncRequest(**request_kwargs)
                 response = self.client.transactions_sync(request)
 
-                # Process ADDED
+                # --- Process ADDED ---
                 for t in response["added"]:
                     if excluded_account_ids and t.account_id in excluded_account_ids:
                         continue
                     if self._should_skip_transaction(t.transaction_id, t.account_id):
                         continue
+                    
+                    # Prevent duplicates within the same run
                     tx_key = f"{t.transaction_id}:{t.account_id}"
                     if tx_key in seen:
                         continue
                     seen.add(tx_key)
-                    t_dict = t.to_dict()
-                    t_dict_serializable = make_json_serializable(t_dict)
+
+                    t_dict_serializable = make_json_serializable(t.to_dict())
                     tx_obj = Transaction(
                         transaction_id=t.transaction_id,
                         account_id=t.account_id,
@@ -168,20 +183,21 @@ class PlaidSyncService:
                         raw_json=t_dict_serializable,
                     )
                     self.session.merge(tx_obj)
-                    added_count += 1
+                    stats["added"] += 1
 
-                # Process MODIFIED
+                # --- Process MODIFIED ---
                 for t in response["modified"]:
                     if excluded_account_ids and t.account_id in excluded_account_ids:
                         continue
                     if self._should_skip_transaction(t.transaction_id, t.account_id):
                         continue
+
                     tx_key = f"{t.transaction_id}:{t.account_id}"
                     if tx_key in seen:
                         continue
                     seen.add(tx_key)
-                    t_dict = t.to_dict()
-                    t_dict_serializable = make_json_serializable(t_dict)
+
+                    t_dict_serializable = make_json_serializable(t.to_dict())
                     tx_obj = Transaction(
                         transaction_id=t.transaction_id,
                         account_id=t.account_id,
@@ -197,10 +213,11 @@ class PlaidSyncService:
                         raw_json=t_dict_serializable,
                     )
                     self.session.merge(tx_obj)
-                    modified_count += 1
+                    stats["modified"] += 1
 
-                # Process REMOVED
+                # --- Process REMOVED ---
                 for t in response["removed"]:
+                    # Check exclusions before deleting (safety check)
                     if excluded_account_ids and t["transaction_id"]:
                         existing = self.session.exec(
                             select(Transaction).where(
@@ -209,13 +226,14 @@ class PlaidSyncService:
                         ).first()
                         if existing and existing.account_id in excluded_account_ids:
                             continue
+
                     stmt = delete(Transaction).where(
                         Transaction.transaction_id == t["transaction_id"]
                     )
                     self.session.exec(stmt)
-                    removed_count += 1
+                    stats["removed"] += 1
 
-                # Update Cursor
+                # --- Update Cursor & Commit ---
                 cursor = response["next_cursor"]
                 plaid_item.next_cursor = cursor
                 self.session.add(plaid_item)
@@ -225,27 +243,39 @@ class PlaidSyncService:
                     break
 
             except plaid.ApiException as e:
-                print(f"  -> Error: {e}")
+                logger.error(f"Plaid API Error ({institution_name}) during transaction sync: {e}")
+                self.session.rollback()
+                break
+            except Exception as e:
+                logger.exception(f"Unexpected error ({institution_name}) during transaction sync: {e}")
                 self.session.rollback()
                 break
 
-        print(
-            f"  -> Added: {added_count}, Modified: {modified_count}, "
-            f"Removed: {removed_count}"
+        logger.info(
+            f"Transactions Synced: Added={stats['added']}, "
+            f"Modified={stats['modified']}, Removed={stats['removed']}"
         )
 
     def sync_holdings(
         self,
         access_token: str,
+        institution_name: str,
         excluded_account_ids: set[str] | None = None,
     ) -> None:
-        """Fetches and saves investment holdings.
+        """Fetches and saves investment holdings (snapshot).
+
+        Holdings are not incremental. This method performs a snapshot sync:
+        1. Fetches current holdings.
+        2. Updates the `Securities` table with any new security definitions.
+        3. DELETES existing holdings for the current `date_captured` (today) to prevent duplication.
+        4. Inserts the new holdings.
 
         Args:
             access_token (str): Plaid access token.
+            institution_name (str): Name of the institution (for logging).
             excluded_account_ids (set[str] | None): Set of account IDs to ignore.
         """
-        print("Syncing Investment Holdings...")
+        logger.info("Syncing Investment Holdings...")
 
         try:
             request = InvestmentsHoldingsGetRequest(access_token=access_token)
@@ -253,11 +283,9 @@ class PlaidSyncService:
 
             today = datetime.date.today()
 
-            # 1. Sync Securities first
+            # 1. Sync Securities first (Upsert)
             for s in response["securities"]:
-                s_dict = s.to_dict()
-                s_dict_serializable = make_json_serializable(s_dict)
-
+                s_dict_serializable = make_json_serializable(s.to_dict())
                 sec_obj = Security(
                     security_id=s.security_id,
                     name=s.name,
@@ -272,12 +300,14 @@ class PlaidSyncService:
                 )
                 self.session.merge(sec_obj)
 
-            # 2. Prevent Duplicates: Delete existing holdings for today
+            # 2. Cleanup: Delete existing holdings for today for THESE accounts
+            # This ensures idempotency if we run the script multiple times a day.
             account_ids = {h.account_id for h in response["holdings"]}
             if excluded_account_ids:
                 account_ids = {
                     aid for aid in account_ids if aid not in excluded_account_ids
                 }
+            
             if account_ids:
                 stmt = delete(InvestmentHolding).where(
                     (InvestmentHolding.date_captured == today)
@@ -285,14 +315,13 @@ class PlaidSyncService:
                 )
                 self.session.exec(stmt)
 
-            # 3. Sync Holdings
+            # 3. Insert Holdings
             count = 0
             for h in response["holdings"]:
                 if excluded_account_ids and h.account_id in excluded_account_ids:
                     continue
-                h_dict = h.to_dict()
-                h_dict_serializable = make_json_serializable(h_dict)
-
+                
+                h_dict_serializable = make_json_serializable(h.to_dict())
                 holding_obj = InvestmentHolding(
                     date_captured=today,
                     account_id=h.account_id,
@@ -308,38 +337,41 @@ class PlaidSyncService:
                 count += 1
 
             self.session.commit()
-            print(f"  -> Saved {count} holdings.")
+            logger.info(f"Saved {count} investment holdings.")
 
         except plaid.ApiException as e:
             error_response = json.loads(e.body)
             if error_response.get("error_code") == "PRODUCTS_NOT_SUPPORTED":
-                print(
-                    "  -> Skipping: Investments product not supported by this "
-                    "institution."
-                )
+                logger.info(f"Investments product not supported by {institution_name}.")
             else:
-                print(f"  -> Error: {e}")
+                logger.error(f"Plaid API Error ({institution_name}) during holdings sync: {e}")
+            self.session.rollback()
+        except Exception as e:
+            logger.exception(f"Unexpected error ({institution_name}) during holdings sync: {e}")
             self.session.rollback()
 
     def sync_investment_transactions(
         self,
         access_token: str,
+        institution_name: str,
         days: int = 730,
         excluded_account_ids: set[str] | None = None,
     ) -> None:
-        """Fetches and saves investment transactions.
+        """Fetches and saves investment transactions (history).
+
+        Uses `options.offset` for pagination to retrieve the full history requested.
 
         Args:
             access_token (str): Plaid access token.
-            days (int): Number of days of history to fetch. Defaults to 730.
+            institution_name (str): Name of the institution (for logging).
+            days (int): Number of days of history to fetch (default: 730).
             excluded_account_ids (set[str] | None): Set of account IDs to ignore.
         """
-        print(f"Syncing Investment Transactions (last {days} days)...")
+        logger.info(f"Syncing Investment Transactions (last {days} days)...")
 
         end_date = datetime.date.today()
         start_date = end_date - datetime.timedelta(days=days)
 
-        # Pagination loop
         offset = 0
         total_retrieved = 0
 
@@ -357,11 +389,9 @@ class PlaidSyncService:
                 inv_transactions = response["investment_transactions"]
                 total_available = response["total_investment_transactions"]
 
-                # Sync Securities (again, just in case new ones appear here)
+                # Upsert Securities
                 for s in response["securities"]:
-                    s_dict = s.to_dict()
-                    s_dict_serializable = make_json_serializable(s_dict)
-
+                    s_dict_serializable = make_json_serializable(s.to_dict())
                     sec_obj = Security(
                         security_id=s.security_id,
                         name=s.name,
@@ -379,14 +409,13 @@ class PlaidSyncService:
                 if not inv_transactions:
                     break
 
-                # Sync Transactions
+                # Upsert Transactions
                 count = 0
                 for t in inv_transactions:
                     if excluded_account_ids and t.account_id in excluded_account_ids:
                         continue
-                    t_dict = t.to_dict()
-                    t_dict_serializable = make_json_serializable(t_dict)
-
+                    
+                    t_dict_serializable = make_json_serializable(t.to_dict())
                     inv_tx_obj = InvestmentTransaction(
                         investment_transaction_id=t.investment_transaction_id,
                         account_id=t.account_id,
@@ -407,10 +436,7 @@ class PlaidSyncService:
 
                 self.session.commit()
                 total_retrieved += count
-                print(
-                    f"  -> Saved {count} investment transactions "
-                    f"(Batch {offset}-{offset + count})."
-                )
+                logger.info(f"Saved {count} investment transactions (Offset: {offset}).")
 
                 offset += len(inv_transactions)
                 if offset >= total_available:
@@ -419,36 +445,35 @@ class PlaidSyncService:
             except plaid.ApiException as e:
                 error_response = json.loads(e.body)
                 if error_response.get("error_code") == "PRODUCTS_NOT_SUPPORTED":
-                    print(
-                        "  -> Skipping: Investments product not supported by this "
-                        "institution."
-                    )
+                    logger.info(f"Investments product not supported by {institution_name}.")
                 else:
-                    print(f"  -> Error: {e}")
+                    logger.error(f"Plaid API Error ({institution_name}) during inv. tx sync: {e}")
                 self.session.rollback()
                 break
 
-        print(f"  -> Total Investment Transactions Synced: {total_retrieved}")
+        logger.info(f"Total Investment Transactions Synced: {total_retrieved}")
 
     def sync_liabilities(
         self,
         access_token: str,
+        institution_name: str,
         excluded_account_ids: set[str] | None = None,
     ) -> None:
-        """Fetches and saves detailed liability information (Credit Cards, Loans).
+        """Fetches and saves Liability data (Credit Cards, Mortgages, Student Loans).
 
         Args:
             access_token (str): Plaid access token.
+            institution_name (str): Name of the institution (for logging).
             excluded_account_ids (set[str] | None): Set of account IDs to ignore.
         """
-        print("Syncing Liabilities (APR/Loan terms)...")
+        logger.info("Syncing Liabilities (APR/Loan terms)...")
         try:
             request = LiabilitiesGetRequest(access_token=access_token)
             response = self.client.liabilities_get(request)
             liabilities = response["liabilities"]
 
             count = 0
-            # Process Credit Cards
+            # Credit Cards
             for c in liabilities.get("credit", []):
                 if excluded_account_ids and c["account_id"] in excluded_account_ids:
                     continue
@@ -466,16 +491,14 @@ class PlaidSyncService:
                 self.session.merge(lib_obj)
                 count += 1
 
-            # Process Mortgages
+            # Mortgages
             for m in liabilities.get("mortgage", []):
                 if excluded_account_ids and m["account_id"] in excluded_account_ids:
                     continue
                 lib_obj = Liability(
                     account_id=m["account_id"],
                     type="mortgage",
-                    interest_rate_percentage=m.get("interest_rate", {}).get(
-                        "percentage"
-                    ),
+                    interest_rate_percentage=m.get("interest_rate", {}).get("percentage"),
                     origination_date=m.get("origination_date"),
                     principal_amount=m.get("origination_principal_amount"),
                     raw_json=make_json_serializable(m),
@@ -483,7 +506,7 @@ class PlaidSyncService:
                 self.session.merge(lib_obj)
                 count += 1
 
-            # Process Student Loans
+            # Student Loans
             for s in liabilities.get("student", []):
                 if excluded_account_ids and s["account_id"] in excluded_account_ids:
                     continue
@@ -504,57 +527,46 @@ class PlaidSyncService:
                 count += 1
 
             self.session.commit()
-            print(f"  -> Saved {count} liability records.")
+            logger.info(f"Saved {count} liability records.")
 
         except plaid.ApiException as e:
             error_response = json.loads(e.body)
             error_code = error_response.get("error_code")
 
             if error_code == "ADDITIONAL_CONSENT_REQUIRED":
-                print(
-                    "  -> [WARN] Action Required: Re-link this institution to "
-                    "enable Liabilities data."
+                logger.warning(
+                    f"Action Required: Re-link {institution_name} to enable Liabilities data."
                 )
             elif error_code == "PRODUCTS_NOT_SUPPORTED":
-                print(
-                    "  -> Skipping: Liabilities product not supported by this "
-                    "institution."
-                )
+                logger.info(f"Liabilities product not supported by {institution_name}.")
             elif error_code == "NO_LIABILITY_ACCOUNTS":
-                print(
-                    "  -> [INFO] No liability accounts (credit cards/loans) "
-                    "found for this item."
-                )
+                logger.info(f"No liability accounts found for {institution_name}.")
             else:
-                print(f"  -> Error: {e}")
+                logger.error(f"Plaid API Error ({institution_name}) during liabilities sync: {e}")
             self.session.rollback()
 
-    def sync_accounts(self, access_token: str) -> str | None:
+    def sync_accounts(self, access_token: str, institution_name: str) -> str | None:
         """Fetches and saves account balances and metadata.
 
         Args:
             access_token (str): Plaid access token.
+            institution_name (str): Name of the institution (for logging).
 
         Returns:
-            str | None: The institution_id if successful, None otherwise.
+            str | None: The `institution_id` (e.g., 'ins_10985') if successful, else None.
         """
-        print("Syncing Accounts (Balances)...")
+        logger.info(f"Syncing Accounts (Balances) for {institution_name}...")
         try:
             request = AccountsGetRequest(access_token=access_token)
             response = self.client.accounts_get(request)
 
-            # Capture Institution ID
             institution_id = response["item"]["institution_id"]
-
             count = 0
+            
             for a in response["accounts"]:
-                a_dict = a.to_dict()
-                a_dict_serializable = make_json_serializable(a_dict)
-
-                # Balances object
+                a_dict_serializable = make_json_serializable(a.to_dict())
                 balances = a.balances
 
-                # SQLModel (Account) can be instantiated directly with validated data
                 acc_obj = Account(
                     account_id=a.account_id,
                     name=a.name,
@@ -571,48 +583,48 @@ class PlaidSyncService:
                     last_updated=datetime.date.today(),
                     raw_json=a_dict_serializable,
                 )
-
-                # Use merge to upsert
                 self.session.merge(acc_obj)
                 count += 1
 
             self.session.commit()
-            print(f"  -> Saved {count} accounts.")
+            logger.info(f"Saved {count} accounts.")
             return institution_id
 
         except plaid.ApiException as e:
-            print(f"  -> Error: {e}")
+            logger.error(f"Plaid API Error ({institution_name}) during accounts sync: {e}")
             self.session.rollback()
             return None
 
 
 def run_sync() -> None:
-    """Orchestrates the synchronization process for all configured access tokens."""
+    """Entry point to orchestrate synchronization for all configured tokens."""
     init_db()
+    
+    # Check for tokens
+    if not Config.PLAID_ACCESS_TOKENS:
+        logger.warning("No PLAID_ACCESS_TOKEN found in .env. Skipping sync.")
+        return
 
+    logger.info(f"Found {len(Config.PLAID_ACCESS_TOKENS)} access token(s).")
+    
     with Session(engine) as session:
         service = PlaidSyncService(session)
-
-        # Support multiple tokens comma-separated
-        access_tokens_str = os.getenv("PLAID_ACCESS_TOKEN", "")
-        access_tokens = [t.strip() for t in access_tokens_str.split(",") if t.strip()]
-
-        if not access_tokens:
-            print("No PLAID_ACCESS_TOKEN found in .env")
-            return
-
-        print(f"Found {len(access_tokens)} access token(s).")
-
         token_map = {}
         seen_tx_keys: set[str] = set()
 
-        for i, token in enumerate(access_tokens):
-            inst_id = service.sync_accounts(token)
-            inst_name = "Unknown Institution"
+        for i, token in enumerate(Config.PLAID_ACCESS_TOKENS):
+            # 1. Try to get institution name from DB first (in case sync fails)
+            existing_item = session.exec(
+                select(PlaidItem).where(PlaidItem.access_token == token)
+            ).first()
+            inst_name = existing_item.institution_name if existing_item and existing_item.institution_name else "Unknown Institution"
+
+            # 2. Sync Accounts (to get Institution ID/Name)
+            inst_id = service.sync_accounts(token, inst_name)
 
             if inst_id:
                 try:
-                    # Update PlaidItem with institution_id
+                    # Update PlaidItem metadata
                     plaid_item = session.exec(
                         select(PlaidItem).where(PlaidItem.access_token == token)
                     ).first()
@@ -623,47 +635,39 @@ def run_sync() -> None:
 
                     plaid_item.institution_id = inst_id
 
-                    # Resolve Name
+                    # Fetch Institution Name
                     request = InstitutionsGetByIdRequest(
                         institution_id=inst_id, country_codes=[CountryCode("US")]
                     )
                     inst_response = service.client.institutions_get_by_id(request)
                     inst_name = inst_response["institution"]["name"]
                     plaid_item.institution_name = inst_name
+                    
                     session.add(plaid_item)
                     session.commit()
-
                 except Exception as e:
-                    print(f"  -> Could not resolve institution name: {e}")
+                    logger.warning(f"Could not resolve institution name: {e}")
                     inst_name = f"Institution {inst_id}"
 
             token_map[token] = inst_name
-            print(f"\n--- Syncing {inst_name} ({i + 1}/{len(access_tokens)}) ---")
+            logger.info(f"--- Syncing {inst_name} ({i + 1}/{len(Config.PLAID_ACCESS_TOKENS)}) ---")
 
-            excluded_account_ids = get_excluded_account_ids(session)
-            if excluded_account_ids:
-                print(
-                    f"Excluding {len(excluded_account_ids)} account(s) from "
-                    "sync for this run."
-                )
+            # 2. Sync Data
+            if Config.EXCLUDED_ACCOUNT_IDS:
+                logger.info(f"Excluding {len(Config.EXCLUDED_ACCOUNT_IDS)} account(s).")
 
-            service.sync_transactions(
-                token,
-                excluded_account_ids,
-                seen_tx_keys,
-            )
-            service.sync_holdings(token, excluded_account_ids)
-            service.sync_investment_transactions(
-                token, 730, excluded_account_ids
-            )
-            service.sync_liabilities(token, excluded_account_ids)
+            service.sync_transactions(token, inst_name, Config.EXCLUDED_ACCOUNT_IDS, seen_tx_keys)
+            service.sync_holdings(token, inst_name, Config.EXCLUDED_ACCOUNT_IDS)
+            service.sync_investment_transactions(token, inst_name, 730, Config.EXCLUDED_ACCOUNT_IDS)
+            service.sync_liabilities(token, inst_name, Config.EXCLUDED_ACCOUNT_IDS)
 
-        print("\n" + "=" * 60)
-        print(f"{'INSTITUTION':<30} | {'ACCESS TOKEN'}")
-        print("-" * 60)
+        # Summary
+        logger.info("=" * 60)
+        logger.info(f"{'INSTITUTION':<30} | {'ACCESS TOKEN'}")
+        logger.info("-" * 60)
         for token, name in token_map.items():
-            print(f"{name:<30} | {token}")
-        print("=" * 60)
+            logger.info(f"{name:<30} | {token}")
+        logger.info("=" * 60)
 
 
 if __name__ == "__main__":

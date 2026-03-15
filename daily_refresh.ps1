@@ -27,18 +27,18 @@ try {
     }
 
     # 1. Sync Data
-    Write-Host "Step 1: Syncing Data..."
-    python -m analysis.main
+    Write-Host "Step 1: Syncing Data (main.py)..."
+    python main.py
     if ($LASTEXITCODE -ne 0) { throw "Sync failed with exit code $LASTEXITCODE" }
 
     # 2. Categorize
     Write-Host "Step 2: Categorizing Transactions..."
-    python -m analysis.services.llm_categorizer
+    python -m services.llm_categorizer
     if ($LASTEXITCODE -ne 0) { throw "Categorization failed with exit code $LASTEXITCODE" }
 
     # 3. Report
     Write-Host "Step 3: Generating Report..."
-    python -m analysis.reporting.portfolio_summary
+    python -m reports.portfolio_summary
     if ($LASTEXITCODE -ne 0) { throw "Reporting failed with exit code $LASTEXITCODE" }
 
     Write-Host "Daily Refresh Completed Successfully."

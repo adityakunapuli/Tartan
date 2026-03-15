@@ -3,9 +3,9 @@
 from unittest.mock import MagicMock
 
 import pytest
-from analysis.db.models import Base
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from db.models import Transaction, PlaidItem, Account, InvestmentHolding, Security
+from sqlmodel import SQLModel, create_engine, Session
+from sqlalchemy.pool import StaticPool
 
 
 @pytest.fixture
@@ -21,10 +21,15 @@ def db_session():
     Yields:
         Session: The SQLAlchemy session.
     """
-    # Use in-memory SQLite for testing
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    Session = sessionmaker(bind=engine)
-    session = Session()
-    yield session
-    session.close()
+    # Use shared in-memory SQLite for testing to allow pandas/engine to see the same data
+    # 'sqlite:///:memory:' with StaticPool ensures all connections share the same memory
+    engine = create_engine(
+        "sqlite:///:memory:", 
+        connect_args={"check_same_thread": False}, 
+        poolclass=StaticPool
+    )
+    # Create all tables defined in models. Using SQLModel.metadata instead of Base
+    SQLModel.metadata.create_all(engine)
+    
+    with Session(engine) as session:
+        yield session

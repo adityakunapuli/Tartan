@@ -1,13 +1,13 @@
 """Data access layer for retrieving financial data as DataFrames."""
 
 import pandas as pd
-from dotenv import find_dotenv, load_dotenv
 
-from analysis.db.session import engine
-from analysis.utils import clean_name
-from analysis.utils.config import parse_csv_env
+from config import Config
+from db.session import engine
+from utils.helpers import clean_name
+from utils.logger import get_logger
 
-load_dotenv(find_dotenv(), override=True)
+logger = get_logger(__name__)
 
 
 def _apply_account_exclusions(df: pd.DataFrame) -> pd.DataFrame:
@@ -23,8 +23,8 @@ def _apply_account_exclusions(df: pd.DataFrame) -> pd.DataFrame:
     if df.empty or "account_id" not in df.columns:
         return df
 
-    excluded_ids = parse_csv_env("EXCLUDED_ACCOUNT_IDS")
-    excluded_names = {n.lower() for n in parse_csv_env("EXCLUDED_ACCOUNT_NAMES")}
+    excluded_ids = Config.EXCLUDED_ACCOUNT_IDS.copy()
+    excluded_names = Config.EXCLUDED_ACCOUNT_NAMES
 
     if excluded_names:
         accounts = pd.read_sql("SELECT account_id, name FROM accounts", engine)
@@ -38,6 +38,7 @@ def _apply_account_exclusions(df: pd.DataFrame) -> pd.DataFrame:
             }
 
     if excluded_ids:
+        # Check against string set
         return df[~df["account_id"].isin(excluded_ids)].copy()
 
     return df
