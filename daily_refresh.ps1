@@ -26,14 +26,17 @@ try {
         Write-Warning "Virtual environment not found at .venv\Scripts\Activate.ps1. Assuming Python is in PATH."
     }
 
+    # Ensure current directory is in PYTHONPATH so module imports work correctly
+    $env:PYTHONPATH = $ScriptPath
+
     # 1. Sync Data
-    Write-Host "Step 1: Syncing Data (main.py)..."
-    python main.py
+    Write-Host "Step 1: Syncing Data..."
+    python -m backend.modules.plaid_integration.sync
     if ($LASTEXITCODE -ne 0) { throw "Sync failed with exit code $LASTEXITCODE" }
 
     # 2. Categorize
     Write-Host "Step 2: Categorizing Transactions..."
-    python -m services.llm_categorizer
+    python -m backend.modules.analytics.categorizer
     if ($LASTEXITCODE -ne 0) { throw "Categorization failed with exit code $LASTEXITCODE" }
 
     # 3. Report

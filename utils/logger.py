@@ -17,6 +17,7 @@ BLUE = "\033[34m"
 CYAN = "\033[36m"
 WHITE = "\033[37m"
 
+
 class PSTFormatter(logging.Formatter):
     """Formatter that enforces Pacific Time (US/Pacific) for timestamps."""
 
@@ -24,10 +25,11 @@ class PSTFormatter(logging.Formatter):
         """Overridden to convert the record timestamp to US/Pacific time."""
         # Convert record creation time to aware datetime in US/Pacific
         dt = datetime.fromtimestamp(record.created, tz=ZoneInfo("US/Pacific"))
-        
+
         if datefmt:
             return dt.strftime(datefmt)
         return dt.isoformat()
+
 
 class ColoredConsoleHandler(logging.StreamHandler):
     """StreamHandler that applies ANSI colors based on log level."""
@@ -59,6 +61,7 @@ class ColoredConsoleHandler(logging.StreamHandler):
 
         return formatted_msg
 
+
 class Logger:
     """Singleton-like logger factory for the application."""
 
@@ -77,7 +80,7 @@ class Logger:
         """
         logger = logging.getLogger(name)
         logger.setLevel(level)
-        
+
         # Avoid adding handlers multiple times if setup is called repeatedly
         if logger.hasHandlers():
             return logger
@@ -90,7 +93,7 @@ class Logger:
         # Format: [HH:MM:SS PST] [LEVEL] Message
         fmt = "[%(asctime)s PST] [%(levelname)s] %(message)s"
         datefmt = "%H:%M:%S"
-        
+
         formatter = PSTFormatter(fmt, datefmt=datefmt)
         handler.setFormatter(formatter)
 
@@ -104,20 +107,21 @@ class Logger:
         Args:
             logger (logging.Logger): The logger instance.
             msg (str): The error message.
-            exc_info: The exception object or tuple (optional). If None, 
+            exc_info: The exception object or tuple (optional). If None,
                       sys.exc_info() is used if available.
         """
         if exc_info is None:
             exc_info = sys.exc_info()
-        
+
         logger.error(msg)
-        
+
         # Format stack trace
         if exc_info and exc_info[0]:
             tb_lines = traceback.format_exception(*exc_info)
             tb_text = "".join(tb_lines)
             # Print stack trace in Red (forced for IDE compatibility)
             print(f"{RED}{tb_text}{RESET}", file=sys.stderr)
+
 
 # Global accessor
 def get_logger(name: str) -> logging.Logger:

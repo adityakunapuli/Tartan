@@ -26,12 +26,12 @@ def db_session():
     # Use shared in-memory SQLite for testing to allow pandas/engine to see the same data
     # 'sqlite:///:memory:' with StaticPool ensures all connections share the same memory
     engine = create_engine(
-        "sqlite:///:memory:", 
-        connect_args={"check_same_thread": False}, 
-        poolclass=StaticPool
+        "sqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
     )
     # Create all tables defined in models. Using SQLModel.metadata instead of Base
     SQLModel.metadata.create_all(engine)
-    
+
     with Session(engine) as session:
         yield session

@@ -118,7 +118,9 @@ def report_investment_status(
         df = df[df["ticker_symbol"].str.lower() == ticker.lower()]
 
     if df.empty:
-        logger.info(f"No holdings match the filters (type={asset_type}, ticker={ticker}).")
+        logger.info(
+            f"No holdings match the filters (type={asset_type}, ticker={ticker})."
+        )
         return
 
     total_value = df["institution_value"].sum()
@@ -149,14 +151,18 @@ def report_investment_status(
 
     logger.info("VALUE BY INSTITUTION:")
     inst_summary = (
-        df.groupby("institution")["institution_value"].sum().sort_values(ascending=False)
+        df.groupby("institution")["institution_value"]
+        .sum()
+        .sort_values(ascending=False)
     )
     for inst, val in inst_summary.items():
         logger.info(f"  {inst:<20}: ${val:12,.2f}")
 
     logger.info("VALUE BY ACCOUNT:")
     acc_summary = (
-        df.groupby("account_name")["institution_value"].sum().sort_values(ascending=False)
+        df.groupby("account_name")["institution_value"]
+        .sum()
+        .sort_values(ascending=False)
     )
     for name, val in acc_summary.items():
         logger.info(f"  {name:<40}: ${val:12,.2f}")

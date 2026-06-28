@@ -4,7 +4,7 @@ import os
 import sys
 
 # Ensure the root project directory is in the Python path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import datetime
 import json
@@ -27,7 +27,11 @@ from sqlmodel import Session, delete, select
 from backend.core.config import settings
 from backend.modules.accounts.models import Account, Liability, PlaidItem
 from backend.modules.transactions.models import Transaction
-from backend.modules.investments.models import Security, InvestmentHolding, InvestmentTransaction
+from backend.modules.investments.models import (
+    Security,
+    InvestmentHolding,
+    InvestmentTransaction,
+)
 from backend.core.database import init_db, engine
 from utils.helpers import make_json_serializable
 from utils.logger import get_logger
@@ -154,7 +158,7 @@ class PlaidSyncService:
                         continue
                     if self._should_skip_transaction(t.transaction_id, t.account_id):
                         continue
-                    
+
                     # Prevent duplicates within the same run
                     tx_key = f"{t.transaction_id}:{t.account_id}"
                     if tx_key in seen:
@@ -237,11 +241,15 @@ class PlaidSyncService:
                     break
 
             except plaid.ApiException as e:
-                logger.error(f"Plaid API Error ({institution_name}) during transaction sync: {e}")
+                logger.error(
+                    f"Plaid API Error ({institution_name}) during transaction sync: {e}"
+                )
                 self.session.rollback()
                 break
             except Exception as e:
-                logger.exception(f"Unexpected error ({institution_name}) during transaction sync: {e}")
+                logger.exception(
+                    f"Unexpected error ({institution_name}) during transaction sync: {e}"
+                )
                 self.session.rollback()
                 break
 
@@ -301,7 +309,7 @@ class PlaidSyncService:
                 account_ids = {
                     aid for aid in account_ids if aid not in excluded_account_ids
                 }
-            
+
             if account_ids:
                 stmt = delete(InvestmentHolding).where(
                     (InvestmentHolding.date_captured == today)
@@ -314,7 +322,7 @@ class PlaidSyncService:
             for h in response["holdings"]:
                 if excluded_account_ids and h.account_id in excluded_account_ids:
                     continue
-                
+
                 h_dict_serializable = make_json_serializable(h.to_dict())
                 holding_obj = InvestmentHolding(
                     date_captured=today,
@@ -338,10 +346,14 @@ class PlaidSyncService:
             if error_response.get("error_code") == "PRODUCTS_NOT_SUPPORTED":
                 logger.info(f"Investments product not supported by {institution_name}.")
             else:
-                logger.error(f"Plaid API Error ({institution_name}) during holdings sync: {e}")
+                logger.error(
+                    f"Plaid API Error ({institution_name}) during holdings sync: {e}"
+                )
             self.session.rollback()
         except Exception as e:
-            logger.exception(f"Unexpected error ({institution_name}) during holdings sync: {e}")
+            logger.exception(
+                f"Unexpected error ({institution_name}) during holdings sync: {e}"
+            )
             self.session.rollback()
 
     def sync_investment_transactions(
@@ -408,7 +420,7 @@ class PlaidSyncService:
                 for t in inv_transactions:
                     if excluded_account_ids and t.account_id in excluded_account_ids:
                         continue
-                    
+
                     t_dict_serializable = make_json_serializable(t.to_dict())
                     inv_tx_obj = InvestmentTransaction(
                         investment_transaction_id=t.investment_transaction_id,
@@ -430,7 +442,9 @@ class PlaidSyncService:
 
                 self.session.commit()
                 total_retrieved += count
-                logger.info(f"Saved {count} investment transactions (Offset: {offset}).")
+                logger.info(
+                    f"Saved {count} investment transactions (Offset: {offset})."
+                )
 
                 offset += len(inv_transactions)
                 if offset >= total_available:
@@ -439,9 +453,13 @@ class PlaidSyncService:
             except plaid.ApiException as e:
                 error_response = json.loads(e.body)
                 if error_response.get("error_code") == "PRODUCTS_NOT_SUPPORTED":
-                    logger.info(f"Investments product not supported by {institution_name}.")
+                    logger.info(
+                        f"Investments product not supported by {institution_name}."
+                    )
                 else:
-                    logger.error(f"Plaid API Error ({institution_name}) during inv. tx sync: {e}")
+                    logger.error(
+                        f"Plaid API Error ({institution_name}) during inv. tx sync: {e}"
+                    )
                 self.session.rollback()
                 break
 
@@ -492,7 +510,9 @@ class PlaidSyncService:
                 lib_obj = Liability(
                     account_id=m["account_id"],
                     type="mortgage",
-                    interest_rate_percentage=m.get("interest_rate", {}).get("percentage"),
+                    interest_rate_percentage=m.get("interest_rate", {}).get(
+                        "percentage"
+                    ),
                     origination_date=m.get("origination_date"),
                     principal_amount=m.get("origination_principal_amount"),
                     raw_json=make_json_serializable(m),
@@ -536,7 +556,9 @@ class PlaidSyncService:
             elif error_code == "NO_LIABILITY_ACCOUNTS":
                 logger.info(f"No liability accounts found for {institution_name}.")
             else:
-                logger.error(f"Plaid API Error ({institution_name}) during liabilities sync: {e}")
+                logger.error(
+                    f"Plaid API Error ({institution_name}) during liabilities sync: {e}"
+                )
             self.session.rollback()
 
     def sync_accounts(self, access_token: str, institution_name: str) -> str | None:
@@ -556,7 +578,7 @@ class PlaidSyncService:
 
             institution_id = response["item"]["institution_id"]
             count = 0
-            
+
             for a in response["accounts"]:
                 a_dict_serializable = make_json_serializable(a.to_dict())
                 balances = a.balances
@@ -575,6 +597,7 @@ class PlaidSyncService:
                     interest_rate=getattr(a, "interest_rate", None),
                     maturity_date=getattr(a, "maturity_date", None),
                     last_updated=datetime.date.today(),
+                    sync_interval_hours=24,
                     raw_json=a_dict_serializable,
                 )
                 self.session.merge(acc_obj)
@@ -585,7 +608,9 @@ class PlaidSyncService:
             return institution_id
 
         except plaid.ApiException as e:
-            logger.error(f"Plaid API Error ({institution_name}) during accounts sync: {e}")
+            logger.error(
+                f"Plaid API Error ({institution_name}) during accounts sync: {e}"
+            )
             self.session.rollback()
             return None
 
@@ -593,14 +618,14 @@ class PlaidSyncService:
 def run_sync() -> None:
     """Entry point to orchestrate synchronization for all configured tokens."""
     init_db()
-    
+
     # Check for tokens
     if not settings.plaid_access_tokens:
         logger.warning("No PLAID_ACCESS_TOKEN found in .env. Skipping sync.")
         return
 
     logger.info(f"Found {len(settings.plaid_access_tokens)} access token(s).")
-    
+
     with Session(engine) as session:
         service = PlaidSyncService(session)
         token_map = {}
@@ -611,7 +636,11 @@ def run_sync() -> None:
             existing_item = session.exec(
                 select(PlaidItem).where(PlaidItem.access_token == token)
             ).first()
-            inst_name = existing_item.institution_name if existing_item and existing_item.institution_name else "Unknown Institution"
+            inst_name = (
+                existing_item.institution_name
+                if existing_item and existing_item.institution_name
+                else "Unknown Institution"
+            )
 
             # 2. Sync Accounts (to get Institution ID/Name)
             inst_id = service.sync_accounts(token, inst_name)
@@ -636,7 +665,7 @@ def run_sync() -> None:
                     inst_response = service.client.institutions_get_by_id(request)
                     inst_name = inst_response["institution"]["name"]
                     plaid_item.institution_name = inst_name
-                    
+
                     session.add(plaid_item)
                     session.commit()
                 except Exception as e:
@@ -644,15 +673,23 @@ def run_sync() -> None:
                     inst_name = f"Institution {inst_id}"
 
             token_map[token] = inst_name
-            logger.info(f"--- Syncing {inst_name} ({i + 1}/{len(settings.plaid_access_tokens)}) ---")
+            logger.info(
+                f"--- Syncing {inst_name} ({i + 1}/{len(settings.plaid_access_tokens)}) ---"
+            )
 
             # 2. Sync Data
             if settings.excluded_account_ids:
-                logger.info(f"Excluding {len(settings.excluded_account_ids)} account(s).")
+                logger.info(
+                    f"Excluding {len(settings.excluded_account_ids)} account(s)."
+                )
 
-            service.sync_transactions(token, inst_name, settings.excluded_account_ids, seen_tx_keys)
+            service.sync_transactions(
+                token, inst_name, settings.excluded_account_ids, seen_tx_keys
+            )
             service.sync_holdings(token, inst_name, settings.excluded_account_ids)
-            service.sync_investment_transactions(token, inst_name, 730, settings.excluded_account_ids)
+            service.sync_investment_transactions(
+                token, inst_name, 730, settings.excluded_account_ids
+            )
             service.sync_liabilities(token, inst_name, settings.excluded_account_ids)
 
         # Summary

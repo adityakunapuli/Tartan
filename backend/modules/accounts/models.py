@@ -1,8 +1,12 @@
+"""SQLModel definitions for accounts, liabilities, and Plaid items."""
+
 from datetime import date
 from sqlmodel import Field, SQLModel, JSON
 from sqlalchemy import Column
 
+
 class Account(SQLModel, table=True):
+    """Represents a financial account synced from Plaid."""
     __tablename__ = "accounts"
 
     account_id: str = Field(primary_key=True)
@@ -18,10 +22,12 @@ class Account(SQLModel, table=True):
     interest_rate: float | None = None
     maturity_date: date | None = None
     last_updated: date
-    sync_interval_hours: int = Field(default=24) # New field for APScheduler
+    sync_interval_hours: int = Field(default=24)  # New field for APScheduler
     raw_json: dict | list | None = Field(default=None, sa_column=Column(JSON))
 
+
 class Liability(SQLModel, table=True):
+    """Represents a liability (credit card, mortgage, student loan) from Plaid."""
     __tablename__ = "liabilities"
 
     account_id: str = Field(primary_key=True)
@@ -38,7 +44,9 @@ class Liability(SQLModel, table=True):
     expected_payoff_date: date | None = None
     raw_json: dict | list | None = Field(default=None, sa_column=Column(JSON))
 
+
 class PlaidItem(SQLModel, table=True):
+    """Represents a Plaid item (linked institution) with sync cursor."""
     __tablename__ = "plaid_items"
 
     access_token: str = Field(primary_key=True)

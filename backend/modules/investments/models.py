@@ -1,9 +1,13 @@
+"""SQLModel definitions for securities, investment holdings, and transactions."""
+
 from datetime import date
 from typing import Optional
 from sqlmodel import Field, SQLModel, Relationship, JSON
 from sqlalchemy import Column
 
+
 class Security(SQLModel, table=True):
+    """Represents a financial security (stock, ETF, mutual fund) from Plaid."""
     __tablename__ = "securities"
 
     security_id: str = Field(primary_key=True)
@@ -19,7 +23,9 @@ class Security(SQLModel, table=True):
 
     holdings: list["InvestmentHolding"] = Relationship(back_populates="security")
 
+
 class InvestmentTransaction(SQLModel, table=True):
+    """Represents an investment transaction (buy/sell) from Plaid."""
     __tablename__ = "investment_transactions"
 
     investment_transaction_id: str = Field(primary_key=True)
@@ -38,7 +44,9 @@ class InvestmentTransaction(SQLModel, table=True):
 
     security: Optional["Security"] = Relationship()
 
+
 class InvestmentHolding(SQLModel, table=True):
+    """Represents an investment holding snapshot from Plaid."""
     __tablename__ = "investment_holdings"
 
     id: int | None = Field(default=None, primary_key=True)

@@ -1,4 +1,4 @@
-import logging
+"""APScheduler for automated Plaid sync and categorization jobs."""
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 # Initialize APScheduler
 scheduler = AsyncIOScheduler()
 
+
 def automated_sync_job():
     """Job to run the Plaid sync and subsequent categorization."""
     logger.info("Running scheduled Plaid Sync...")
@@ -23,13 +24,14 @@ def automated_sync_job():
     except Exception as e:
         logger.error(f"Error during scheduled sync: {e}")
 
+
 def start_scheduler():
     """Starts the background scheduler."""
     # Here we can add dynamic logic to run based on Account.sync_interval_hours,
     # but for a simple start, let's run it once every 24 hours.
     # To run varying frequencies, we'd query the DB for accounts and schedule them individually.
     # For now, we will just sync all items every 12 hours.
-    
+
     scheduler.add_job(
         automated_sync_job,
         trigger=IntervalTrigger(hours=12),
@@ -39,6 +41,7 @@ def start_scheduler():
     )
     scheduler.start()
     logger.info("APScheduler started. Automated sync scheduled.")
+
 
 def stop_scheduler():
     """Stops the scheduler."""

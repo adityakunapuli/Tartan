@@ -162,11 +162,15 @@ def get_enriched_transactions_df() -> pd.DataFrame:
 
     # 4. Vectorized Heuristic Fallback (Safety Net)
     # Catch transfers and income that might have been missed
-    mask = df["name"].str.upper().str.contains(
-        "TRANSFER|GOLDMAN SACHS|ONLINE BANKING|PAYMENT TO|CREDIT CRD|VACP TREAS|"
-        "VA BENEF|GUSTO|PAYROLL|MR. COOPER",
-        regex=True,
-        na=False,
+    mask = (
+        df["name"]
+        .str.upper()
+        .str.contains(
+            "TRANSFER|GOLDMAN SACHS|ONLINE BANKING|PAYMENT TO|CREDIT CRD|VACP TREAS|"
+            "VA BENEF|GUSTO|PAYROLL|MR. COOPER",
+            regex=True,
+            na=False,
+        )
     )
     uncat_mask = df["enriched_category"] == "Uncategorized"
 

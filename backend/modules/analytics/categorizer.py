@@ -39,7 +39,7 @@ def _fetch_transactions(session: Session) -> list[Transaction]:
     """
     excluded_ids = settings.excluded_account_ids.copy()
     excluded_names = settings.excluded_account_names
-    
+
     if excluded_names:
         accounts = session.exec(select(Account)).all()
         for a in accounts:
@@ -48,12 +48,12 @@ def _fetch_transactions(session: Session) -> list[Transaction]:
 
     if excluded_ids:
         logger.info(f"Excluding {len(excluded_ids)} account(s) from categorization.")
-    
-    # In a real prod env, we might want to filter in SQL, but for local 
-    # finance, filtering in Python after fetch is acceptable and keeps 
+
+    # In a real prod env, we might want to filter in SQL, but for local
+    # finance, filtering in Python after fetch is acceptable and keeps
     # the 'excluded_names' logic simple without complex joins.
     all_tx = session.exec(select(Transaction)).all()
-    
+
     if not excluded_ids:
         return list(all_tx)
 
@@ -61,7 +61,7 @@ def _fetch_transactions(session: Session) -> list[Transaction]:
     skipped = len(all_tx) - len(valid_tx)
     if skipped > 0:
         logger.info(f"Skipped {skipped} transaction(s) due to exclusions.")
-        
+
     return valid_tx
 
 
@@ -86,7 +86,7 @@ def _group_transactions(transactions: list[Transaction]) -> dict[str, dict]:
         if key not in clusters:
             clusters[key] = {"type": ktype, "txs": []}
         clusters[key]["txs"].append(tx)
-    
+
     return clusters
 
 
@@ -236,7 +236,9 @@ def _process_categorization(session: Session, clusters: dict[str, dict]) -> None
         logger.info("No new merchants/patterns to categorize.")
         return
 
-    logger.info(f"Queued {len(pending)} patterns for LLM categorization with {LLM_WORKERS} workers.")
+    logger.info(
+        f"Queued {len(pending)} patterns for LLM categorization with {LLM_WORKERS} workers."
+    )
 
     # 2. Parallel LLM Querying
     results = []
@@ -256,7 +258,9 @@ def _process_categorization(session: Session, clusters: dict[str, dict]) -> None
 
             if result:
                 category, flow_type = result
-                logger.info(f"Categorized [{match_type}]: {key} ({tx_count} txs) -> {category} ({flow_type})")
+                logger.info(
+                    f"Categorized [{match_type}]: {key} ({tx_count} txs) -> {category} ({flow_type})"
+                )
                 results.append((key, match_type, category, flow_type))
 
     # 3. Save Rules
@@ -282,10 +286,10 @@ def run_categorization() -> None:
     with Session(engine) as session:
         transactions = _fetch_transactions(session)
         logger.info(f"Loaded {len(transactions)} valid transactions.")
-        
+
         clusters = _group_transactions(transactions)
         logger.info(f"Identified {len(clusters)} unique patterns/merchants.")
-        
+
         _process_categorization(session, clusters)
 
 

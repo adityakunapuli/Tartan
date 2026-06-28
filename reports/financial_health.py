@@ -40,7 +40,7 @@ def get_current_liquidity() -> float:
     """
     query = "SELECT current_balance FROM accounts WHERE type = 'depository'"
     df = pd.read_sql(query, engine)
-    return df['current_balance'].sum() if not df.empty else 0.0
+    return df["current_balance"].sum() if not df.empty else 0.0
 
 
 def get_revolving_debt() -> float:
@@ -54,7 +54,7 @@ def get_revolving_debt() -> float:
     if df.empty:
         return 0.0
     # Only count positive balances (money you owe).
-    return df[df['current_balance'] > 0]['current_balance'].sum()
+    return df[df["current_balance"] > 0]["current_balance"].sum()
 
 
 def get_installment_debt() -> float:
@@ -65,7 +65,7 @@ def get_installment_debt() -> float:
     """
     query = "SELECT current_balance FROM accounts WHERE type = 'loan'"
     df = pd.read_sql(query, engine)
-    return df['current_balance'].sum() if not df.empty else 0.0
+    return df["current_balance"].sum() if not df.empty else 0.0
 
 
 def analyze_financial_health() -> None:
@@ -82,21 +82,21 @@ def analyze_financial_health() -> None:
         logger.warning("No transactions found. Cannot calculate burn rate.")
         return
 
-    latest_date = df['date'].max()
+    latest_date = df["date"].max()
     six_months_ago = latest_date - pd.DateOffset(months=6)
 
     # We exclude 'TRANSFER' and 'INCOME' to get true spending
     expenses = df[
-        (df['date'] >= six_months_ago) &
-        (df['flow_type'] == 'EXPENSE') &
-        (df['amount'] > 0)
-        ]
+        (df["date"] >= six_months_ago)
+        & (df["flow_type"] == "EXPENSE")
+        & (df["amount"] > 0)
+    ]
 
     if expenses.empty:
         logger.warning("No expenses found in the last 6 months.")
         return
 
-    total_spend = expenses['amount'].sum()
+    total_spend = expenses["amount"].sum()
     monthly_burn = total_spend / 6.0
 
     logger.info(f"[METRIC] Gross Burn Rate (6-mo Avg): ${monthly_burn:,.2f} / month")
@@ -106,7 +106,9 @@ def analyze_financial_health() -> None:
     monthly_net_burn = max(0, monthly_burn - monthly_spouse_income)
 
     logger.info(f"[METRIC] Guaranteed Monthly Income: ${monthly_spouse_income:,.2f}")
-    logger.info(f"[METRIC] Net Burn Rate (Risk Exposure): ${monthly_net_burn:,.2f} / month")
+    logger.info(
+        f"[METRIC] Net Burn Rate (Risk Exposure): ${monthly_net_burn:,.2f} / month"
+    )
 
     target_cash = monthly_net_burn * 6.0
     logger.info(f"[METRIC] Target Emergency Fund (6 Months Net): ${target_cash:,.2f}")
@@ -126,26 +128,38 @@ def analyze_financial_health() -> None:
     logger.info("--- STRATEGY EXECUTION ---")
 
     if deployable_cash > 0:
-        logger.info(f"✅ SURPLUS DETECTED: You have ${deployable_cash:,.2f} in excess cash.")
+        logger.info(
+            f"✅ SURPLUS DETECTED: You have ${deployable_cash:,.2f} in excess cash."
+        )
 
         # Priority 1: Revolving Debt
         if revolving_debt > 0:
             pay_amount = min(deployable_cash, revolving_debt)
-            logger.warning(f"🚨 PRIORITY 1: Pay off ${pay_amount:,.2f} of Credit Card debt IMMEDIATELY.")
+            logger.warning(
+                f"🚨 PRIORITY 1: Pay off ${pay_amount:,.2f} of Credit Card debt IMMEDIATELY."
+            )
             deployable_cash -= pay_amount
 
         # Priority 2: Installment Debt or Invest
         if deployable_cash > 0:
             if installment_debt > 0:
-                logger.info(f"✅ Credit Cards Clear. You have ${deployable_cash:,.2f} available to attack Loans or Invest.")
-                logger.info("   -> Recommendation: Compare Loan APR vs Expected Investment Return.")
+                logger.info(
+                    f"✅ Credit Cards Clear. You have ${deployable_cash:,.2f} available to attack Loans or Invest."
+                )
+                logger.info(
+                    "   -> Recommendation: Compare Loan APR vs Expected Investment Return."
+                )
             else:
-                logger.info(f"🎉 DEBT FREE. Invest ${deployable_cash:,.2f} (529, Backdoor Roth, Brokerage).")
+                logger.info(
+                    f"🎉 DEBT FREE. Invest ${deployable_cash:,.2f} (529, Backdoor Roth, Brokerage)."
+                )
 
     else:
         shortfall = abs(deployable_cash)
         logger.warning(f"[WARN] RISK ALERT: You are underfunded by ${shortfall:,.2f}.")
-        logger.warning("  -> ACTION: Halt all extra debt payments. Hoard cash until Target is met.")
+        logger.warning(
+            "  -> ACTION: Halt all extra debt payments. Hoard cash until Target is met."
+        )
 
     # 5. Future Liquidity (Vesting)
     logger.info("🔮 FUTURE LIQUIDITY (Next 12 Months) 🔮")
@@ -162,11 +176,12 @@ def analyze_financial_health() -> None:
             description = event.get("description", "Vesting Event")
             amount_post_tax = float(event.get("amount_post_tax", 0.0) or 0.0)
             logger.info(
-                f"  -> {event_date} (+{days_until} days): {description} - ${amount_post_tax:,.2f}")
+                f"  -> {event_date} (+{days_until} days): {description} - ${amount_post_tax:,.2f}"
+            )
             future_cash += amount_post_tax
 
     logger.info(f"  -> Total Projected Inflow: ${future_cash:,.2f}")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     analyze_financial_health()
