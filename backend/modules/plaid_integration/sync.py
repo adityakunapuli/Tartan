@@ -141,6 +141,7 @@ class PlaidSyncService:
 
         cursor = plaid_item.next_cursor
         stats = {"added": 0, "modified": 0, "removed": 0}
+        sync_failed = False
         seen = seen_tx_keys if seen_tx_keys is not None else set()
 
         while True:
@@ -245,18 +246,26 @@ class PlaidSyncService:
                     f"Plaid API Error ({institution_name}) during transaction sync: {e}"
                 )
                 self.session.rollback()
+                sync_failed = True
                 break
             except Exception as e:
                 logger.exception(
                     f"Unexpected error ({institution_name}) during transaction sync: {e}"
                 )
                 self.session.rollback()
+                sync_failed = True
                 break
 
-        logger.info(
-            f"Transactions Synced: Added={stats['added']}, "
-            f"Modified={stats['modified']}, Removed={stats['removed']}"
-        )
+        if sync_failed:
+            logger.error(
+                f"Transactions sync FAILED for {institution_name}. "
+                "No transactions were processed."
+            )
+        else:
+            logger.info(
+                f"Transactions Synced: Added={stats['added']}, "
+                f"Modified={stats['modified']}, Removed={stats['removed']}"
+            )
 
     def sync_holdings(
         self,
