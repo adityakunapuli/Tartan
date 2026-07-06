@@ -6,10 +6,10 @@ import unittest
 from unittest.mock import patch, MagicMock
 from sqlmodel import select
 
-from backend.modules.transactions.models import Transaction
-from backend.modules.rules.models import CategoryRule
-from backend.modules.accounts.models import Account
-from backend.modules.analytics.categorizer import (
+from modules.transactions.models import Transaction
+from modules.rules.models import CategoryRule
+from modules.accounts.models import Account
+from modules.analytics.categorizer import (
     _fetch_transactions,
     _group_transactions,
     query_llm,

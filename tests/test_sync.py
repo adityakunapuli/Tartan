@@ -3,10 +3,10 @@
 import datetime
 from unittest.mock import MagicMock
 
-from backend.modules.accounts.models import Account, PlaidItem
-from backend.modules.investments.models import InvestmentHolding
-from backend.modules.transactions.models import Transaction
-from backend.modules.plaid_integration.sync import PlaidSyncService
+from modules.accounts.models import Account, PlaidItem
+from modules.investments.models import InvestmentHolding
+from modules.transactions.models import Transaction
+from modules.plaid_integration.sync import PlaidSyncService
 from sqlalchemy import select
 
 

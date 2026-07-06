@@ -5,8 +5,8 @@ from datetime import date
 from pathlib import Path
 
 import pandas as pd
-from backend.modules.transactions.logic import get_enriched_transactions_df
-from backend.core.database import engine
+from modules.transactions.logic import get_enriched_transactions_df
+from core.db.database import engine
 from utils.logger import get_logger
 
 logger = get_logger(__name__)

@@ -2,8 +2,8 @@
 
 import pandas as pd
 
-from analysis.backend.modules.transactions.logic import get_transactions_df
-from analysis.utils import clean_name
+from modules.transactions.logic import get_transactions_df
+from utils.helpers import clean_name
 
 
 def analyze_missing_merchants(df: pd.DataFrame) -> None:

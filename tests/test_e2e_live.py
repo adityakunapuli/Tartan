@@ -6,7 +6,7 @@ import plaid
 from plaid.api import plaid_api
 from dotenv import load_dotenv, find_dotenv
 
-from backend.core.config import settings as Config
+from core.config import settings as Config
 
 # Load env to check if we can run this
 load_dotenv(find_dotenv())

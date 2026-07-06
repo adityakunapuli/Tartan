@@ -6,8 +6,8 @@ from datetime import date
 import pandas as pd
 from dotenv import find_dotenv, load_dotenv
 
-from backend.modules.transactions.logic import get_denormalized_holdings
-from backend.core.database import engine
+from modules.transactions.logic import get_denormalized_holdings
+from core.db.database import engine
 from utils.logger import get_logger
 
 logger = get_logger(__name__)

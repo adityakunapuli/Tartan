@@ -4,12 +4,12 @@ import pytest
 from unittest.mock import patch, MagicMock
 from sqlmodel import select
 
-from backend.modules.plaid_integration.sync import run_sync
-from backend.modules.analytics.categorizer import run_categorization
+from modules.plaid_integration.sync import run_sync
+from modules.analytics.categorizer import run_categorization
 from reports.portfolio_summary import print_portfolio_summary
-from backend.modules.transactions.models import Transaction
-from backend.modules.rules.models import CategoryRule
-from backend.modules.accounts.models import PlaidItem
+from modules.transactions.models import Transaction
+from modules.rules.models import CategoryRule
+from modules.accounts.models import PlaidItem
 import datetime  # Import datetime for date object usage in mocks
 
 
@@ -52,8 +52,8 @@ def patch_engine(db_session):
         patch("backend.modules.analytics.categorizer.engine", test_engine),
         patch("backend.modules.transactions.logic.engine", test_engine),
         patch(
-            "backend.core.database.engine", test_engine
-        ),  # Patching backend.core.database.engine ensures init_db works
+            "core.db.database.engine", test_engine
+        ),  # Patching core.db.database.engine ensures init_db works
     ):
         yield
 

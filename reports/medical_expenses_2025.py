@@ -5,7 +5,7 @@ from datetime import date
 
 import pandas as pd
 
-from backend.modules.transactions.logic import get_enriched_transactions_df
+from modules.transactions.logic import get_enriched_transactions_df
 
 
 # Ensure the root project directory is in the Python path

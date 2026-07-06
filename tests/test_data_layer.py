@@ -7,15 +7,15 @@ import unittest
 from unittest.mock import patch
 from sqlmodel import Session, select
 
-from backend.modules.accounts.models import Account
-from backend.modules.transactions.models import Transaction
-from backend.modules.rules.models import CategoryRule
-from backend.modules.transactions.logic import (
+from modules.accounts.models import Account
+from modules.transactions.models import Transaction
+from modules.rules.models import CategoryRule
+from modules.transactions.logic import (
     _apply_account_exclusions,
     get_transactions_df,
     get_enriched_transactions_df,
 )
-from backend.core.config import settings as Config
+from core.config import settings as Config
 
 
 @pytest.fixture(autouse=True)

@@ -1,23 +1,15 @@
 services:
-  backend:
+  api:
     build:
       context: .
-      dockerfile: Dockerfile.backend
+      dockerfile: Dockerfile
+    container_name: plaid-api
     ports:
-      - "8008:8000"
+      - "8000:8000"
     volumes:
-      - ./backend:/app/backend
-      - ./financial_data.db:/app/financial_data.db
-    environment:
-      - DB_URL=sqlite:////app/financial_data.db
+      - db_data:/app/core/db
     env_file:
       - .env
-
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    ports:
-      - "8080:80"
-    depends_on:
-      - backend
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped
