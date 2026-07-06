@@ -1,1 +1,0 @@
-"""Transactions module: models and logic for financial transactions."""

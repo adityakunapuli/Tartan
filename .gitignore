@@ -1,3 +1,4 @@
+node_modules/
 .playwright-cli/
 # Python backend
 backend/data/**
