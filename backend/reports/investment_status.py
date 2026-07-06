@@ -1,0 +1,197 @@
+"""Reporting script for investment status and performance analysis."""
+
+import json
+from datetime import date
+
+import pandas as pd
+from dotenv import find_dotenv, load_dotenv
+
+from modules.transactions.logic import get_denormalized_holdings
+from core.db.database import engine
+from utils.logger import get_logger
+
+logger = get_logger(__name__)
+
+
+def get_institution_name_heuristic(account_name: str) -> str:
+    """Guesses the institution name based on the account name."""
+    name = str(account_name).lower()
+    if "amgen" in name or "pennymac" in name or "bank of america" in name:
+        return "Merrill Lynch / BofA"
+    if "brokerage" in name or "ira" in name:
+        return "E*TRADE"
+    if "marcus" in name or "goldman" in name:
+        return "Marcus"
+    return "Other"
+
+
+def sanitize_cost_basis(row: pd.Series) -> float | None:
+    """Heuristic to fix or exclude bad cost basis data."""
+    basis = row["cost_basis"]
+    val = row["institution_value"]
+
+    if basis is None or basis == 0:
+        return None
+
+    if val > 1.0 and basis > (val * 10):
+        corrected = basis / 100.0
+        if corrected < (val * 5):
+            return corrected
+        return None
+
+    return basis
+
+
+def _print_account_breakdown(df: pd.DataFrame, ticker: str) -> None:
+    """Prints a breakdown of shares by account for a specific ticker."""
+    df_acc = df[df["ticker_symbol"].str.lower() == ticker.lower()].copy()
+    if not df_acc.empty:
+        summary = (
+            df_acc.groupby("account_name")
+            .agg(
+                {
+                    "quantity": "sum",
+                    "institution_price": "first",
+                    "institution_value": "sum",
+                }
+            )
+            .reset_index()
+            .sort_values("institution_value", ascending=False)
+        )
+        logger.info(f"\nDETAILED BREAKDOWN FOR {ticker.upper()}:")
+        print(summary.to_string(index=False))
+
+
+def _print_ytd_summary(
+    current_value: float, asset_type: str | None, ticker: str | None
+) -> None:
+    """Prints YTD performance comparison."""
+    today = date.today()
+    start_of_year = date(today.year, 1, 1)
+
+    date_query = (
+        f"SELECT MIN(date_captured) as start_date FROM investment_holdings "
+        f"WHERE date_captured >= '{start_of_year}'"
+    )
+    date_res = pd.read_sql(date_query, engine)
+    if date_res.empty or date_res["start_date"].iloc[0] is None:
+        return
+    start_date = date_res["start_date"].iloc[0]
+    query = f"""
+        SELECT SUM(h.institution_value) as total_val FROM investment_holdings h
+        LEFT JOIN securities s ON h.security_id = s.security_id
+        WHERE h.date_captured = '{start_date}'
+    """
+    if asset_type:
+        query += f" AND LOWER(s.type) = '{asset_type.lower()}'"
+    if ticker:
+        query += f" AND LOWER(s.ticker_symbol) = '{ticker.lower()}'"
+    res = pd.read_sql(query, engine)
+    if not res.empty and res["total_val"].iloc[0] is not None:
+        start_val = res["total_val"].iloc[0]
+        change = current_value - start_val
+        pct = (change / start_val * 100) if start_val != 0 else 0
+        logger.info("-" * 60)
+        logger.info(f"YTD PERFORMANCE (since {start_date})")
+        logger.info(f"  Starting Value:  ${start_val:14,.2f}")
+        logger.info(f"  Change:          ${change:14,.2f} ({pct:.2f}%)")
+        logger.info("-" * 60)
+
+
+def report_investment_status(
+    asset_type: str | None = None,
+    ticker: str | None = None,
+    show_json: bool = False,
+) -> None:
+    """Calculates and prints investment performance metrics."""
+    df = get_denormalized_holdings()
+
+    if df.empty:
+        logger.info("No investment holdings found.")
+        return
+
+    df["institution"] = df["account_name"].apply(get_institution_name_heuristic)
+
+    if asset_type:
+        df = df[df["security_type"].str.lower() == asset_type.lower()]
+    if ticker:
+        df = df[df["ticker_symbol"].str.lower() == ticker.lower()]
+
+    if df.empty:
+        logger.info(
+            f"No holdings match the filters (type={asset_type}, ticker={ticker})."
+        )
+        return
+
+    total_value = df["institution_value"].sum()
+
+    df["cost_basis_fixed"] = df.apply(sanitize_cost_basis, axis=1)
+    df["unrealized_gain"] = df["institution_value"] - df["cost_basis_fixed"]
+    df["gain_pct"] = df["unrealized_gain"] / df["cost_basis_fixed"] * 100
+
+    total_cost_valid = df["cost_basis_fixed"].sum()
+    total_value_with_basis = df[df["cost_basis_fixed"].notna()][
+        "institution_value"
+    ].sum()
+    total_gain = total_value_with_basis - total_cost_valid
+    gain_pct = (total_gain / total_cost_valid * 100) if total_cost_valid != 0 else 0
+
+    if show_json:
+        print(json.dumps(df.to_dict(orient="records"), indent=2))
+        return
+
+    logger.info("=" * 60)
+    logger.info("INVESTMENT STATUS REPORT")
+    logger.info("=" * 60)
+    logger.info(f"Snapshot Date: {df['date_captured'].iloc[0]}")
+    logger.info(f"Total Portfolio Value:  ${total_value:14,.2f}")
+    logger.info(f"Adj. Cost Basis:        ${total_cost_valid:14,.2f}")
+    logger.info(f"Adj. Unrealized Gain:   ${total_gain:14,.2f} ({gain_pct:.2f}%)")
+    logger.info("-" * 60)
+
+    logger.info("VALUE BY INSTITUTION:")
+    inst_summary = (
+        df.groupby("institution")["institution_value"]
+        .sum()
+        .sort_values(ascending=False)
+    )
+    for inst, val in inst_summary.items():
+        logger.info(f"  {inst:<20}: ${val:12,.2f}")
+
+    logger.info("VALUE BY ACCOUNT:")
+    acc_summary = (
+        df.groupby("account_name")["institution_value"]
+        .sum()
+        .sort_values(ascending=False)
+    )
+    for name, val in acc_summary.items():
+        logger.info(f"  {name:<40}: ${val:12,.2f}")
+
+    logger.info("TOP HOLDINGS & PERFORMANCE:")
+    pd.options.display.float_format = "{:,.2f}".format
+    cols = ["security_name", "ticker_symbol", "institution_value", "gain_pct"]
+    print(
+        df[cols]
+        .sort_values(by="institution_value", ascending=False)
+        .head(15)
+        .to_string(index=False)
+    )
+
+    invalid = df[df["cost_basis_fixed"].isna() & df["cost_basis"].notna()]
+    if not invalid.empty:
+        logger.warning("DATA QUALITY WARNING: Ignored erroneous cost basis for:")
+        for _, row in invalid.iterrows():
+            logger.warning(
+                f"    - {row['security_name']}: Reported ${row['cost_basis']:,.0f} "
+                f"vs Value ${row['institution_value']:,.0f}"
+            )
+
+    if ticker:
+        _print_account_breakdown(df, ticker)
+
+    _print_ytd_summary(total_value, asset_type, ticker)
+
+
+if __name__ == "__main__":
+    load_dotenv(find_dotenv(), override=True)
+    report_investment_status()

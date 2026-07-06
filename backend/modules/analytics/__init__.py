@@ -1,0 +1,1 @@
+"""Analytics module: LLM-based transaction categorization."""

@@ -1,0 +1,16 @@
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff check
+        entry: ruff check .
+        language: system
+        types: [python]
+        pass_filenames: false
+      
+      - id: eslint
+        name: eslint
+        entry: bash -c 'cd auth_utility/frontend && npm run lint'
+        language: system
+        types: [javascript, jsx, ts, tsx]
+        pass_filenames: false
